@@ -212,6 +212,25 @@ describe("PHP imports", () => {
     ]);
   });
 
+  it("matches and deduplicates preferred imports case-insensitively", () => {
+    const registry = createImportRegistry(
+      ["Zed"],
+      ["App\\Alpha", "Vendor\\Zed"],
+    );
+
+    importClass(registry, "App\\Alpha");
+    importClass(registry, "Vendor\\Zed");
+
+    expect(renderUseStatements(registry, [
+      "vendor\\zed",
+      "\\VENDOR\\ZED",
+      "VeNdOr\\ZeD",
+    ])).toEqual([
+      "use Vendor\\Zed as VendorZed;",
+      "use App\\Alpha;",
+    ]);
+  });
+
   it("keeps global deterministic sorting when no preferred imports are supplied", () => {
     const registry = createImportRegistry([]);
 

@@ -275,24 +275,26 @@ export function renderUseStatements(
   preferredImports: readonly string[] = [],
 ): readonly string[] {
   const state = registryState(registry);
-  const statementsByClassName = new Map(
+  const statementsByClassKey = new Map(
     [...state.imports.entries()].map(([alias, fullyQualifiedClassName]) => {
       const shortName = fullyQualifiedClassName.split("\\").at(-1);
       const statement = alias === shortName
         ? `use ${fullyQualifiedClassName};`
         : `use ${fullyQualifiedClassName} as ${alias};`;
 
-      return [fullyQualifiedClassName, statement] as const;
+      return [fullyQualifiedClassName.toLowerCase(), statement] as const;
     }),
   );
-  const preferredClassNames = new Set(
-    preferredImports.map(canonicalFullyQualifiedClassName),
+  const preferredClassKeys = new Set(
+    preferredImports.map((fullyQualifiedClassName) => (
+      canonicalFullyQualifiedClassName(fullyQualifiedClassName).toLowerCase()
+    )),
   );
-  const preferredStatements = [...preferredClassNames]
-    .map((fullyQualifiedClassName) => statementsByClassName.get(fullyQualifiedClassName))
+  const preferredStatements = [...preferredClassKeys]
+    .map((fullyQualifiedClassKey) => statementsByClassKey.get(fullyQualifiedClassKey))
     .filter((statement): statement is string => statement !== undefined);
-  const remainingStatements = [...statementsByClassName.entries()]
-    .filter(([fullyQualifiedClassName]) => !preferredClassNames.has(fullyQualifiedClassName))
+  const remainingStatements = [...statementsByClassKey.entries()]
+    .filter(([fullyQualifiedClassKey]) => !preferredClassKeys.has(fullyQualifiedClassKey))
     .map(([, statement]) => statement)
     .sort();
 
