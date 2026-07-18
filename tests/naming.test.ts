@@ -22,6 +22,7 @@ function record(key: string, name: string): SkirRecord {
 describe("PHP name conversion", () => {
   it("converts schema names to PHP identifiers", () => {
     expect(toClassName("get_user-profile status")).toBe("GetUserProfileStatus");
+    expect(toClassName("Envelope.Metadata")).toBe("EnvelopeMetadata");
     expect(toPropertyName("get_user-profile status")).toBe("getUserProfileStatus");
     expect(toPhpNamespaceSegment("admin.api-v2")).toBe("AdminApiV2");
   });

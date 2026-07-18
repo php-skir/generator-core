@@ -1,4 +1,16 @@
 import type { NormalizedRecord, NormalizedSchema } from "./model.js";
+import { normalizeModulePath } from "./module-path.js";
+import {
+  toClassName,
+  toPhpNamespaceSegment,
+  toPropertyName,
+} from "./php-identifier.js";
+
+export {
+  toClassName,
+  toPhpNamespaceSegment,
+  toPropertyName,
+} from "./php-identifier.js";
 
 export interface PhpNameRegistry {
   readonly namesByIdentity: ReadonlyMap<string, string>;
@@ -18,21 +30,16 @@ export function buildPhpNameRegistry(
   schema: NormalizedSchema,
   recordClassName: (record: NormalizedRecord) => string,
 ): PhpNameRegistry {
-  const moduleByPath = new Map(schema.modules.map((module) => [module.path, module]));
   const candidates: NameCandidate[] = [];
   const candidatesByCaseInsensitiveName = new Map<string, NameCandidate>();
 
   for (const record of schema.recordsByIdentity.values()) {
-    const module = moduleByPath.get(record.modulePath);
-
-    if (module === undefined) {
-      throw new Error(`No normalized module exists for record ${record.identity}.`);
-    }
+    const modulePath = normalizeModulePath(record.modulePath);
 
     const baseClassName = recordClassName(record);
     assertValidPhpClassName(baseClassName, `for record ${record.identity}`);
 
-    const namespace = [rootNamespace, ...module.namespaceSegments]
+    const namespace = [rootNamespace, ...modulePath.namespaceSegments]
       .filter((segment) => segment !== "")
       .join("\\");
     const candidate = { record, namespace, baseClassName };
@@ -107,33 +114,19 @@ export function buildPhpNameRegistry(
       qualifiedName: `${candidate.namespace}\\${className}`,
     });
     namesByIdentity.set(candidate.record.identity, className);
+  }
 
-    if (candidate.record.key !== undefined) {
-      namesByRecordKey.set(candidate.record.key, className);
+  for (const [key, record] of schema.recordsByKey) {
+    const className = namesByIdentity.get(record.identity);
+
+    if (className === undefined) {
+      throw new Error(`No PHP class name was resolved for Skir record key "${key}" (${record.identity}).`);
     }
+
+    namesByRecordKey.set(key, className);
   }
 
   return { namesByIdentity, namesByRecordKey };
-}
-
-export function toClassName(name: string): string {
-  const className = name
-    .split(/[_\-\s]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join("");
-
-  return /^[0-9]/.test(className) ? `_${className}` : className;
-}
-
-export function toPropertyName(name: string): string {
-  const className = toClassName(name);
-
-  return className.charAt(0).toLowerCase() + className.slice(1);
-}
-
-export function toPhpNamespaceSegment(name: string): string {
-  return toClassName(name.replace(/[^A-Za-z0-9]+/g, "_"));
 }
 
 function moduleClassPrefix(modulePath: string): string {

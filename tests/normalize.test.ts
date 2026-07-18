@@ -2,7 +2,9 @@ import type { Field, Record, RecordLocation, Token } from "skir-internal";
 import { describe, expect, it } from "vitest";
 
 import {
+  buildPhpNameRegistry,
   normalizeSchema,
+  toClassName,
   type SkirModule,
   type SkirRecord,
   type SkirRecordLocation,
@@ -318,10 +320,10 @@ describe("normalizeSchema", () => {
   it("rejects case-insensitive module namespace collisions", () => {
     expect(() => normalizeSchema({
       modules: [
-        { path: "admin-api/users.skir" },
-        { path: "admin_api/audits.skir" },
+        { path: "user-profile/profile.skir" },
+        { path: "user_profile/account.skir" },
       ],
-    })).toThrow(/namespace normalization collision.*admin-api.*admin_api/i);
+    })).toThrow(/UserProfile.*user-profile.*user_profile/i);
   });
 
   it("reports unresolved imported record keys", () => {
@@ -338,5 +340,148 @@ describe("normalizeSchema", () => {
       }],
       recordMap: new Map(),
     })).toThrow(/record key "missing-key".*could not be resolved/i);
+  });
+
+  it("indexes external record locations by their authoritative map keys without generating them", () => {
+    const addressRecord: SkirRecord = {
+      kind: "record",
+      key: "stale-record-key",
+      name: token("Address", "common/address.skir"),
+      recordType: "struct",
+      fields: [{
+        kind: "field",
+        name: token("city", "common/address.skir"),
+        number: 0,
+        type: { kind: "primitive", primitive: "string" },
+      }],
+    };
+    const addressLocation: SkirRecordLocation = {
+      kind: "record-location",
+      record: addressRecord,
+      recordAncestors: [addressRecord],
+      modulePath: "common/address.skir",
+    };
+    const schema = normalizeSchema({
+      recordMap: new Map([
+        ["common/address.skir:0", addressLocation],
+        ["address-alias", addressLocation],
+      ]),
+      modules: [{
+        path: "admin/users.skir",
+        records: [{
+          kind: "struct",
+          name: token("User"),
+          fields: [{
+            kind: "field",
+            name: token("address"),
+            number: 0,
+            type: {
+              kind: "record",
+              key: "common/address.skir:0",
+              nameParts: [{ token: token("Address", "common/address.skir") }],
+            },
+          }],
+        }],
+      }],
+    });
+    const externalRecord = schema.recordsByIdentity.get("common/address.skir::Address");
+    const names = buildPhpNameRegistry("App\\Skir", schema, (record) => (
+      toClassName(record.qualifiedName)
+    ));
+
+    expect(schema.modules).toHaveLength(1);
+    expect(schema.modules[0]?.records.map((record) => record.identity)).toEqual([
+      "admin/users.skir::User",
+    ]);
+    expect(externalRecord).toMatchObject({
+      identity: "common/address.skir::Address",
+      modulePath: "common/address.skir",
+      qualifiedName: "Address",
+      recordType: "struct",
+      fields: [],
+      key: "address-alias",
+    });
+    expect(schema.recordsByKey.get("common/address.skir:0")).toBe(externalRecord);
+    expect(schema.recordsByKey.get("address-alias")).toBe(externalRecord);
+    expect(schema.recordsByKey.has("stale-record-key")).toBe(false);
+    expect(schema.modules[0]?.records[0]?.fields[0]).toMatchObject({
+      type: {
+        kind: "record",
+        recordIdentity: "common/address.skir::Address",
+        recordType: "struct",
+      },
+    });
+    expect(names.namesByIdentity.get("common/address.skir::Address")).toBe("Address");
+    expect(names.namesByRecordKey.get("common/address.skir:0")).toBe("Address");
+    expect(names.namesByRecordKey.get("address-alias")).toBe("Address");
+  });
+
+  it("associates authoritative map-key aliases with generated records that omit their own key", () => {
+    const user: SkirRecord = {
+      kind: "record",
+      name: token("User"),
+      recordType: "struct",
+      fields: [],
+    };
+    const location: SkirRecordLocation = {
+      kind: "record-location",
+      record: user,
+      recordAncestors: [user],
+      modulePath: "admin/users.skir",
+    };
+    const schema = normalizeSchema({
+      modules: [{ path: "admin/users.skir", records: [location] }],
+      recordMap: new Map([
+        ["admin/users.skir:0", location],
+        ["user-alias", location],
+      ]),
+    });
+    const generatedRecord = schema.modules[0]?.records[0];
+
+    expect(schema.recordsByKey.get("admin/users.skir:0")).toBe(generatedRecord);
+    expect(schema.recordsByKey.get("user-alias")).toBe(generatedRecord);
+    expect(schema.recordsByIdentity.size).toBe(1);
+  });
+
+  it("rejects conflicting authoritative map keys and record types", () => {
+    const generatedUser: SkirRecord = {
+      kind: "record",
+      key: "shared-key",
+      name: token("User"),
+      recordType: "struct",
+      fields: [],
+    };
+    const externalStatus: SkirRecord = {
+      kind: "record",
+      name: token("Status", "common/status.skir"),
+      recordType: "enum",
+      fields: [],
+    };
+    const conflictingUser: SkirRecord = {
+      kind: "record",
+      name: token("User"),
+      recordType: "enum",
+      fields: [],
+    };
+
+    expect(() => normalizeSchema({
+      modules: [{ path: "admin/users.skir", records: [generatedUser] }],
+      recordMap: new Map([["shared-key", {
+        kind: "record-location",
+        record: externalStatus,
+        recordAncestors: [externalStatus],
+        modulePath: "common/status.skir",
+      }]]),
+    })).toThrow(/record key "shared-key".*admin\/users\.skir::User.*common\/status\.skir::Status/i);
+
+    expect(() => normalizeSchema({
+      modules: [{ path: "admin/users.skir", records: [generatedUser] }],
+      recordMap: new Map([["user-alias", {
+        kind: "record-location",
+        record: conflictingUser,
+        recordAncestors: [conflictingUser],
+        modulePath: "admin/users.skir",
+      }]]),
+    })).toThrow(/admin\/users\.skir::User.*struct.*enum/i);
   });
 });

@@ -10,6 +10,7 @@ import type {
   SkirModule,
   SkirRecordLocation,
 } from "./model.js";
+import { normalizeModulePath } from "./module-path.js";
 import { normalizeSchema } from "./normalize.js";
 import { buildPhpNameRegistry, type PhpNameRegistry, toClassName, toPropertyName } from "./naming.js";
 import { renderEnum } from "./render-enum.js";
@@ -264,11 +265,7 @@ function fullyQualifiedRecordClassName(
     throw new Error(`No normalized record exists for ${type.recordIdentity}.`);
   }
 
-  const module = schema.modules.find((candidate) => candidate.path === record.modulePath);
-
-  if (module === undefined) {
-    throw new Error(`No normalized module exists for record ${record.identity}.`);
-  }
+  const modulePath = normalizeModulePath(record.modulePath);
 
   const className = names.namesByIdentity.get(record.identity);
 
@@ -276,7 +273,7 @@ function fullyQualifiedRecordClassName(
     throw new Error(`No PHP class name was resolved for record ${record.identity}.`);
   }
 
-  return [rootNamespace, ...module.namespaceSegments, className]
+  return [rootNamespace, ...modulePath.namespaceSegments, className]
     .filter((segment) => segment !== "")
     .join("\\");
 }

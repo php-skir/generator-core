@@ -16,7 +16,7 @@ import type {
   SkirToken,
   SkirType,
 } from "./model.js";
-import { toPhpNamespaceSegment } from "./naming.js";
+import { normalizeModulePath } from "./module-path.js";
 
 const NORMALIZED_PRIMITIVES = new Set([
   "bool",
@@ -32,9 +32,7 @@ const NORMALIZED_PRIMITIVES = new Set([
 ]);
 
 interface RecordSource {
-  readonly module: SkirModule;
   readonly record: SkirRecord;
-  readonly location?: SkirRecordLocation;
   readonly identity: string;
   readonly modulePath: string;
   readonly qualifiedName: string;
@@ -45,20 +43,20 @@ interface RecordSource {
 interface NormalizationContext {
   readonly recordsByIdentity: ReadonlyMap<string, NormalizedRecord>;
   readonly recordsByKey: ReadonlyMap<string, NormalizedRecord>;
-  readonly recordMap?: ReadonlyMap<string, SkirRecordLocation>;
   readonly currentModulePath: string;
   readonly description: string;
 }
 
 export function normalizeSchema(input: CoreGeneratorInput): NormalizedSchema {
-  const moduleShapes = input.modules.map((module) => normalizeModuleShape(module));
+  const moduleShapes = input.modules.map((module) => normalizeModulePath(module.path));
   assertDistinctModuleNamespaces(moduleShapes);
 
   const sourcesByModule = input.modules.map((module) => (
     (module.records ?? []).map((record) => recordSource(module, record))
   ));
   const recordsByIdentity = new Map<string, NormalizedRecord>();
-  const recordsByKey = new Map<string, NormalizedRecord>();
+  const recordIdentitiesByKey = new Map<string, string>();
+  const recordIdentitiesByObject = new Map<SkirRecord, string>();
 
   for (const sources of sourcesByModule) {
     for (const source of sources) {
@@ -66,9 +64,7 @@ export function normalizeSchema(input: CoreGeneratorInput): NormalizedSchema {
         throw new Error(`Duplicate normalized record identity ${source.identity}.`);
       }
 
-      if (source.key !== undefined && recordsByKey.has(source.key)) {
-        throw new Error(`Duplicate Skir record key "${source.key}".`);
-      }
+      assertConsistentRecordObjectLocation(recordIdentitiesByObject, source);
 
       const normalized: NormalizedRecord = {
         identity: source.identity,
@@ -82,14 +78,43 @@ export function normalizeSchema(input: CoreGeneratorInput): NormalizedSchema {
       recordsByIdentity.set(normalized.identity, normalized);
 
       if (normalized.key !== undefined) {
-        recordsByKey.set(normalized.key, normalized);
+        bindRecordKey(recordIdentitiesByKey, normalized.key, normalized.identity, "module record");
       }
     }
   }
 
+  const generatedSources = sourcesByModule.flat();
+  const recordMapEntries = [...(input.recordMap?.entries() ?? [])]
+    .sort(([leftKey], [rightKey]) => leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0);
+
+  for (const [mapKey, location] of recordMapEntries) {
+    const source = recordMapSource(mapKey, location, generatedSources);
+    const existing = recordsByIdentity.get(source.identity);
+
+    assertConsistentRecordObjectLocation(recordIdentitiesByObject, source);
+
+    if (existing === undefined) {
+      recordsByIdentity.set(source.identity, {
+        identity: source.identity,
+        modulePath: source.modulePath,
+        qualifiedName: source.qualifiedName,
+        recordType: source.recordType,
+        fields: [],
+        key: mapKey,
+      });
+    } else if (existing.recordType !== source.recordType) {
+      throw new Error(
+        `Record map location for key "${mapKey}" resolves to ${source.identity}, whose normalized record is ${existing.recordType}, but the location record is ${source.recordType}.`,
+      );
+    }
+
+    bindRecordKey(recordIdentitiesByKey, mapKey, source.identity, "recordMap location");
+  }
+
+  const recordsByKey = recordsForKeys(recordIdentitiesByKey, recordsByIdentity);
+
   const modules: NormalizedModule[] = [];
-  const finalRecordsByIdentity = new Map<string, NormalizedRecord>();
-  const finalRecordsByKey = new Map<string, NormalizedRecord>();
+  const finalRecordsByIdentity = new Map(recordsByIdentity);
 
   for (let moduleIndex = 0; moduleIndex < input.modules.length; moduleIndex += 1) {
     const module = input.modules[moduleIndex];
@@ -103,7 +128,6 @@ export function normalizeSchema(input: CoreGeneratorInput): NormalizedSchema {
       const context: NormalizationContext = {
         recordsByIdentity,
         recordsByKey,
-        recordMap: input.recordMap,
         currentModulePath: source.modulePath,
         description: `record ${source.identity}`,
       };
@@ -118,16 +142,11 @@ export function normalizeSchema(input: CoreGeneratorInput): NormalizedSchema {
 
       finalRecordsByIdentity.set(normalized.identity, normalized);
 
-      if (normalized.key !== undefined) {
-        finalRecordsByKey.set(normalized.key, normalized);
-      }
-
       return normalized;
     });
     const methods = (module.methods ?? []).map((method) => normalizeMethod(method, {
       recordsByIdentity,
       recordsByKey,
-      recordMap: input.recordMap,
       currentModulePath: module.path,
       description: `method ${tokenText(method.name)} in ${module.path}`,
     }));
@@ -135,26 +154,12 @@ export function normalizeSchema(input: CoreGeneratorInput): NormalizedSchema {
     modules.push({ ...shape, records, methods });
   }
 
+  const finalRecordsByKey = recordsForKeys(recordIdentitiesByKey, finalRecordsByIdentity);
+
   return {
     modules,
     recordsByIdentity: finalRecordsByIdentity,
     recordsByKey: finalRecordsByKey,
-  };
-}
-
-function normalizeModuleShape(module: SkirModule): Omit<NormalizedModule, "records" | "methods"> {
-  const pathParts = module.path.split("/");
-  const sourceDirectory = pathParts.slice(0, -1).join("/");
-  const namespaceSegments = pathParts
-    .slice(0, -1)
-    .map((part) => toPhpNamespaceSegment(part))
-    .filter((part) => part !== "");
-
-  return {
-    path: module.path,
-    sourceDirectory,
-    namespaceSegments,
-    moduleIdentity: namespaceSegments.length === 0 ? "_Root" : namespaceSegments.join("."),
   };
 }
 
@@ -171,7 +176,7 @@ function assertDistinctModuleNamespaces(
       sourceDirectoriesByNamespace.set(namespaceKey, module.sourceDirectory);
     } else if (existingSourceDirectory !== module.sourceDirectory) {
       throw new Error(
-        `Module namespace normalization collision: source directories ${existingSourceDirectory || "<root>"} and ${module.sourceDirectory || "<root>"} produce the same case-insensitive PHP namespace ${module.moduleIdentity}.`,
+        `Module namespace normalization collision: ${module.moduleIdentity} is produced by source directories ${existingSourceDirectory || "<root>"} and ${module.sourceDirectory || "<root>"}.`,
       );
     }
   }
@@ -184,25 +189,115 @@ function recordSource(module: SkirModule, input: SkirRecord | SkirRecordLocation
   const qualifiedName = location === undefined
     ? tokenText(record.name)
     : qualifiedNameForLocation(location);
-  const recordType = record.recordType
-    ?? (record.kind === "struct" || record.kind === "enum" ? record.kind : undefined);
-
-  if (recordType === undefined) {
-    throw new Error(`Skir record ${modulePath}::${qualifiedName} has no struct or enum record type.`);
-  }
+  const recordType = recordTypeFor(record, `${modulePath}::${qualifiedName}`);
 
   const key = typeof record.key === "string" ? record.key : undefined;
 
   return {
-    module,
     record,
-    location,
     modulePath,
     qualifiedName,
     identity: `${modulePath}::${qualifiedName}`,
     recordType,
     ...(key === undefined ? {} : { key }),
   };
+}
+
+function recordTypeFor(record: SkirRecord, identity: string): "struct" | "enum" {
+  const recordType = record.recordType
+    ?? (record.kind === "struct" || record.kind === "enum" ? record.kind : undefined);
+
+  if (recordType === undefined) {
+    throw new Error(`Skir record ${identity} has no struct or enum record type.`);
+  }
+
+  return recordType;
+}
+
+function recordMapSource(
+  mapKey: string,
+  location: SkirRecordLocation,
+  generatedSources: readonly RecordSource[],
+): RecordSource {
+  let modulePath = location.modulePath;
+
+  if (modulePath === undefined) {
+    const matchingSources = generatedSources.filter((source) => source.record === location.record);
+
+    if (matchingSources.length !== 1) {
+      throw new Error(
+        `Record map location for key "${mapKey}" has no module path and cannot be associated with exactly one generated record.`,
+      );
+    }
+
+    modulePath = matchingSources[0]?.modulePath;
+  }
+
+  if (modulePath === undefined) {
+    throw new Error(`Record map location for key "${mapKey}" has no module path.`);
+  }
+
+  const qualifiedName = qualifiedNameForLocation(location);
+  const recordType = recordTypeFor(location.record, `${modulePath}::${qualifiedName}`);
+
+  return {
+    record: location.record,
+    modulePath,
+    qualifiedName,
+    identity: `${modulePath}::${qualifiedName}`,
+    recordType,
+  };
+}
+
+function assertConsistentRecordObjectLocation(
+  recordIdentitiesByObject: Map<SkirRecord, string>,
+  source: RecordSource,
+): void {
+  const existingIdentity = recordIdentitiesByObject.get(source.record);
+
+  if (existingIdentity !== undefined && existingIdentity !== source.identity) {
+    throw new Error(
+      `Conflicting record locations for the same Skir record: ${existingIdentity} and ${source.identity}.`,
+    );
+  }
+
+  recordIdentitiesByObject.set(source.record, source.identity);
+}
+
+function bindRecordKey(
+  recordIdentitiesByKey: Map<string, string>,
+  key: string,
+  identity: string,
+  sourceDescription: string,
+): void {
+  const existingIdentity = recordIdentitiesByKey.get(key);
+
+  if (existingIdentity !== undefined && existingIdentity !== identity) {
+    throw new Error(
+      `Skir record key "${key}" resolves to both ${existingIdentity} and ${identity} through ${sourceDescription}.`,
+    );
+  }
+
+  recordIdentitiesByKey.set(key, identity);
+}
+
+function recordsForKeys(
+  recordIdentitiesByKey: ReadonlyMap<string, string>,
+  recordsByIdentity: ReadonlyMap<string, NormalizedRecord>,
+): Map<string, NormalizedRecord> {
+  const recordsByKey = new Map<string, NormalizedRecord>();
+
+  for (const [key, identity] of recordIdentitiesByKey) {
+    const record = recordsByIdentity.get(identity);
+
+    if (record === undefined) {
+      throw new Error(`No normalized record exists for Skir record key "${key}" (${identity}).`);
+    }
+
+    recordsByKey.set(key, record);
+  }
+
+  return recordsByKey;
 }
 
 function qualifiedNameForLocation(location: SkirRecordLocation): string {
@@ -341,23 +436,6 @@ function normalizeRecordType(type: SkirType, context: NormalizationContext): Nor
   const key = typeof type.key === "string" ? type.key : undefined;
 
   if (key !== undefined) {
-    if (context.recordMap !== undefined) {
-      const location = context.recordMap.get(key);
-
-      if (location === undefined) {
-        throw new Error(`Skir record key "${key}" in ${context.description} could not be resolved through recordMap.`);
-      }
-
-      const identity = `${location.modulePath ?? context.currentModulePath}::${qualifiedNameForLocation(location)}`;
-      const mappedRecord = context.recordsByIdentity.get(identity);
-
-      if (mappedRecord === undefined) {
-        throw new Error(`Skir record key "${key}" resolves to ${identity}, which is not present in the normalized modules.`);
-      }
-
-      return recordType(mappedRecord, type.recordType, context);
-    }
-
     const localRecord = context.recordsByKey.get(key);
 
     if (localRecord === undefined) {

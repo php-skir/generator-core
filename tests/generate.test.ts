@@ -299,6 +299,54 @@ describe("generatePhp", () => {
     expect(adapter.calls.filter((call) => call.startsWith("prepare:"))).toEqual([]);
   });
 
+  it("resolves external record locations in RPC output without emitting their record files", () => {
+    const addressRecord = {
+      kind: "record",
+      recordType: "struct" as const,
+      name: "Address",
+      fields: [],
+    };
+    const files = generatePhp({
+      namespace: "App\\Skir",
+      recordMap: new Map([["common/address.skir:0", {
+        kind: "record-location",
+        record: addressRecord,
+        recordAncestors: [addressRecord],
+        modulePath: "common/address.skir",
+      }]]),
+      modules: [{
+        path: "admin/users.skir",
+        methods: [{
+          kind: "method",
+          name: "ResolveAddress",
+          number: 1,
+          requestType: {
+            kind: "record",
+            key: "common/address.skir:0",
+            nameParts: [{ token: { text: "Address" } }],
+          },
+          responseType: "bool",
+        }],
+      }],
+      adapter: new RecordingAdapter(),
+    });
+    const methodsFile = files.find((file) => file.path === "Admin/SkirMethods.php");
+    const clientFile = files.find((file) => file.path === "Admin/SkirRpcClient.php");
+    const manifestFile = files.find((file) => file.path === "skir-server-manifest.json");
+
+    expect(files.some((file) => file.path === "Common/AddressObject.php")).toBe(false);
+    expect(methodsFile?.code).toContain("use App\\Skir\\Common\\AddressObject;");
+    expect(clientFile?.code).toContain("use App\\Skir\\Common\\AddressObject;");
+    expect(JSON.parse(manifestFile?.code ?? "")).toMatchObject({
+      modules: [{
+        methods: [{
+          requestType: "App\\Skir\\Common\\AddressObject",
+          requestClass: "App\\Skir\\Common\\AddressObject",
+        }],
+      }],
+    });
+  });
+
   it("returns only a terminal manifest for an empty schema", () => {
     const files = generatePhp({
       namespace: "Neutral",

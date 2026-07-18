@@ -1,4 +1,5 @@
 export { normalizeSchema } from "./normalize.js";
+export { normalizeModulePath } from "./module-path.js";
 export { generateNormalizedPhp, generatePhp } from "./generate.js";
 export {
   generateServerManifestFile,
