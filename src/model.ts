@@ -114,6 +114,7 @@ export interface NormalizedRecord {
   readonly modulePath: string;
   readonly qualifiedName: string;
   readonly recordType: "struct" | "enum";
+  readonly phpClassName?: string;
   readonly fields: readonly (
     | NormalizedField
     | NormalizedEnumConstant

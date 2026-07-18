@@ -443,6 +443,100 @@ describe("normalizeSchema", () => {
     expect(schema.recordsByIdentity.size).toBe(1);
   });
 
+  it("preserves exact PHP class metadata for generated and external records through aliases", () => {
+    const generatedUser: SkirRecord = {
+      kind: "record",
+      name: token("User"),
+      recordType: "struct",
+      fields: [],
+      phpClassName: "Exact-Generated-Override",
+    };
+    const externalAddress: SkirRecord = {
+      kind: "record",
+      name: token("Address", "common/address.skir"),
+      recordType: "struct",
+      fields: [],
+      phpClassName: "Exact\\External\\Override",
+    };
+    const generatedLocation: SkirRecordLocation = {
+      kind: "record-location",
+      record: generatedUser,
+      recordAncestors: [generatedUser],
+      modulePath: "admin/users.skir",
+    };
+    const externalLocation: SkirRecordLocation = {
+      kind: "record-location",
+      record: externalAddress,
+      recordAncestors: [externalAddress],
+      modulePath: "common/address.skir",
+    };
+    const schema = normalizeSchema({
+      modules: [{ path: "admin/users.skir", records: [generatedLocation] }],
+      recordMap: new Map([
+        ["address-alias", externalLocation],
+        ["common/address.skir:0", externalLocation],
+        ["user-alias", generatedLocation],
+      ]),
+    });
+    const normalizedGenerated = schema.modules[0]?.records[0];
+    const normalizedExternal = schema.recordsByIdentity.get("common/address.skir::Address");
+
+    expect(normalizedGenerated?.phpClassName).toBe("Exact-Generated-Override");
+    expect(schema.recordsByIdentity.get("admin/users.skir::User")).toBe(normalizedGenerated);
+    expect(schema.recordsByKey.get("user-alias")).toBe(normalizedGenerated);
+    expect(normalizedExternal?.phpClassName).toBe("Exact\\External\\Override");
+    expect(schema.recordsByKey.get("address-alias")).toBe(normalizedExternal);
+    expect(schema.recordsByKey.get("common/address.skir:0")).toBe(normalizedExternal);
+  });
+
+  it("keeps generated PHP class metadata and rejects incompatible metadata reuse", () => {
+    const generatedUser: SkirRecord = {
+      kind: "record",
+      name: token("User"),
+      recordType: "struct",
+      fields: [],
+      phpClassName: "GeneratedUser",
+    };
+    const generatedLocation: SkirRecordLocation = {
+      kind: "record-location",
+      record: generatedUser,
+      recordAncestors: [generatedUser],
+      modulePath: "admin/users.skir",
+    };
+    const equivalentMapRecord: SkirRecord = {
+      kind: "record",
+      name: token("User"),
+      recordType: "struct",
+      fields: [],
+    };
+    const schema = normalizeSchema({
+      modules: [{ path: "admin/users.skir", records: [generatedLocation] }],
+      recordMap: new Map([["user-alias", {
+        kind: "record-location",
+        record: equivalentMapRecord,
+        recordAncestors: [equivalentMapRecord],
+        modulePath: "admin/users.skir",
+      }]]),
+    });
+
+    expect(schema.recordsByKey.get("user-alias")?.phpClassName).toBe("GeneratedUser");
+
+    const conflictingMapRecord: SkirRecord = {
+      ...equivalentMapRecord,
+      phpClassName: "ConflictingUser",
+    };
+
+    expect(() => normalizeSchema({
+      modules: [{ path: "admin/users.skir", records: [generatedLocation] }],
+      recordMap: new Map([["user-alias", {
+        kind: "record-location",
+        record: conflictingMapRecord,
+        recordAncestors: [conflictingMapRecord],
+        modulePath: "admin/users.skir",
+      }]]),
+    })).toThrow(/admin\/users\.skir::User.*GeneratedUser.*ConflictingUser/i);
+  });
+
   it("rejects conflicting authoritative map keys and record types", () => {
     const generatedUser: SkirRecord = {
       kind: "record",

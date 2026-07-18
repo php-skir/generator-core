@@ -103,6 +103,10 @@ function renderRecord(
     throw new Error(`No PHP class name was resolved for record ${record.identity}.`);
   }
 
+  const targetImports = record.recordType === "struct"
+    ? input.adapter.structImports?.(record) ?? []
+    : [];
+
   const context = createRenderContext(
     input,
     module,
@@ -111,8 +115,10 @@ function renderRecord(
       ...plannedImports,
       "Skir\\Runtime\\DenseJson",
       "Skir\\Runtime\\EnumValue",
+      "Skir\\Runtime\\Field",
       "Skir\\Runtime\\Type",
       "Skir\\Runtime\\Variant",
+      ...targetImports,
     ],
   );
 
@@ -180,7 +186,7 @@ function manifestPhpType(
   if (type.kind === "optional") {
     const innerType = manifestPhpType(input, context, type.inner);
 
-    return innerType.includes("|") ? `${innerType}|null` : `?${innerType}`;
+    return nullablePhpType(innerType);
   }
 
   if (type.kind === "record") {
@@ -217,7 +223,25 @@ function manifestResponseClass(
 }
 
 function unwrapOptional(type: NormalizedType): NormalizedType {
-  return type.kind === "optional" ? type.inner : type;
+  let innerType = type;
+
+  while (innerType.kind === "optional") {
+    innerType = innerType.inner;
+  }
+
+  return innerType;
+}
+
+function nullablePhpType(type: string): string {
+  if (
+    type === "mixed"
+    || type.startsWith("?")
+    || type.split("|").some((member) => member.trim().toLowerCase() === "null")
+  ) {
+    return type;
+  }
+
+  return type.includes("|") ? `${type}|null` : `?${type}`;
 }
 
 function createRenderContext(

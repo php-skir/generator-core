@@ -38,6 +38,7 @@ interface RecordSource {
   readonly qualifiedName: string;
   readonly recordType: "struct" | "enum";
   readonly key?: string;
+  readonly phpClassName?: string;
 }
 
 interface NormalizationContext {
@@ -73,6 +74,7 @@ export function normalizeSchema(input: CoreGeneratorInput): NormalizedSchema {
         recordType: source.recordType,
         fields: [],
         ...(source.key === undefined ? {} : { key: source.key }),
+        ...(source.phpClassName === undefined ? {} : { phpClassName: source.phpClassName }),
       };
 
       recordsByIdentity.set(normalized.identity, normalized);
@@ -101,11 +103,21 @@ export function normalizeSchema(input: CoreGeneratorInput): NormalizedSchema {
         recordType: source.recordType,
         fields: [],
         key: mapKey,
+        ...(source.phpClassName === undefined ? {} : { phpClassName: source.phpClassName }),
       });
     } else if (existing.recordType !== source.recordType) {
       throw new Error(
         `Record map location for key "${mapKey}" resolves to ${source.identity}, whose normalized record is ${existing.recordType}, but the location record is ${source.recordType}.`,
       );
+    } else {
+      assertCompatiblePhpClassName(existing, source, mapKey);
+
+      if (existing.phpClassName === undefined && source.phpClassName !== undefined) {
+        recordsByIdentity.set(source.identity, {
+          ...existing,
+          phpClassName: source.phpClassName,
+        });
+      }
     }
 
     bindRecordKey(recordIdentitiesByKey, mapKey, source.identity, "recordMap location");
@@ -138,6 +150,7 @@ export function normalizeSchema(input: CoreGeneratorInput): NormalizedSchema {
         recordType: source.recordType,
         fields: normalizeFields(source.record, source.recordType, context),
         ...(source.key === undefined ? {} : { key: source.key }),
+        ...(source.phpClassName === undefined ? {} : { phpClassName: source.phpClassName }),
       };
 
       finalRecordsByIdentity.set(normalized.identity, normalized);
@@ -200,6 +213,7 @@ function recordSource(module: SkirModule, input: SkirRecord | SkirRecordLocation
     identity: `${modulePath}::${qualifiedName}`,
     recordType,
     ...(key === undefined ? {} : { key }),
+    ...(record.phpClassName === undefined ? {} : { phpClassName: record.phpClassName }),
   };
 }
 
@@ -246,7 +260,26 @@ function recordMapSource(
     qualifiedName,
     identity: `${modulePath}::${qualifiedName}`,
     recordType,
+    ...(location.record.phpClassName === undefined
+      ? {}
+      : { phpClassName: location.record.phpClassName }),
   };
+}
+
+function assertCompatiblePhpClassName(
+  existing: NormalizedRecord,
+  source: RecordSource,
+  mapKey: string,
+): void {
+  if (
+    existing.phpClassName !== undefined
+    && source.phpClassName !== undefined
+    && existing.phpClassName !== source.phpClassName
+  ) {
+    throw new Error(
+      `Record map location for key "${mapKey}" resolves to ${source.identity} with incompatible PHP class names "${existing.phpClassName}" and "${source.phpClassName}".`,
+    );
+  }
 }
 
 function assertConsistentRecordObjectLocation(

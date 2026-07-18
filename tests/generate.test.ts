@@ -347,6 +347,146 @@ describe("generatePhp", () => {
     });
   });
 
+  it("renders recursively nullable manifest types and object classes as valid schema-1 JSON", () => {
+    class NullableManifestAdapter extends RecordingAdapter {
+      public override phpType(type: NormalizedType, context: RenderContext): string {
+        if (type.kind === "int64") {
+          return "int|string";
+        }
+
+        if (type.kind === "hash64") {
+          return "int|string|null";
+        }
+
+        return super.phpType(type, context);
+      }
+    }
+
+    const nestedOptional = (other: NormalizedType | string): {
+      readonly kind: "optional";
+      readonly other: {
+        readonly kind: "optional";
+        readonly other: NormalizedType | string;
+      };
+    } => ({
+      kind: "optional",
+      other: { kind: "optional", other },
+    });
+    const payloadReference = {
+      kind: "record",
+      key: "payload-key",
+      recordType: "struct" as const,
+    };
+    const stateReference = {
+      kind: "record",
+      key: "state-key",
+      recordType: "enum" as const,
+    };
+    const files = generatePhp({
+      namespace: "Neutral",
+      modules: [{
+        path: "rpc/api.skir",
+        records: [{
+          kind: "record",
+          key: "payload-key",
+          name: "Payload",
+          recordType: "struct",
+          fields: [],
+        }, {
+          kind: "record",
+          key: "state-key",
+          name: "State",
+          recordType: "enum",
+          fields: [],
+        }],
+        methods: [{
+          kind: "method",
+          name: "OptionalMixed",
+          number: 1,
+          requestType: { kind: "optional", other: "mixed" },
+          responseType: { kind: "optional", other: "mixed" },
+        }, {
+          kind: "method",
+          name: "OptionalUnions",
+          number: 2,
+          requestType: { kind: "optional", other: "int64" },
+          responseType: nestedOptional("hash64"),
+        }, {
+          kind: "method",
+          name: "NestedStringAndArray",
+          number: 3,
+          requestType: nestedOptional("string"),
+          responseType: nestedOptional({ kind: "array", item: { kind: "string" } }),
+        }, {
+          kind: "method",
+          name: "NestedStruct",
+          number: 4,
+          requestType: nestedOptional(payloadReference),
+          responseType: nestedOptional(payloadReference),
+        }, {
+          kind: "method",
+          name: "NestedEnum",
+          number: 5,
+          requestType: nestedOptional(stateReference),
+          responseType: nestedOptional(stateReference),
+        }],
+      }],
+      adapter: new NullableManifestAdapter(),
+    });
+    const manifestCode = files.find((file) => file.path === "skir-server-manifest.json")?.code ?? "";
+
+    expect(JSON.parse(manifestCode)).toEqual({
+      version: 1,
+      generator: "neutral-adapter",
+      modules: [{
+        name: "Rpc",
+        methodEnum: "Neutral\\Rpc\\RpcSkirMethod",
+        methods: [{
+          name: "OptionalMixed",
+          enumCase: "OptionalMixed",
+          phpMethod: "optionalMixed",
+          requestType: "mixed",
+          requestClass: null,
+          responseType: "mixed",
+          responseClass: null,
+        }, {
+          name: "OptionalUnions",
+          enumCase: "OptionalUnions",
+          phpMethod: "optionalUnions",
+          requestType: "int|string|null",
+          requestClass: null,
+          responseType: "int|string|null",
+          responseClass: null,
+        }, {
+          name: "NestedStringAndArray",
+          enumCase: "NestedStringAndArray",
+          phpMethod: "nestedStringAndArray",
+          requestType: "?string",
+          requestClass: null,
+          responseType: "?array",
+          responseClass: null,
+        }, {
+          name: "NestedStruct",
+          enumCase: "NestedStruct",
+          phpMethod: "nestedStruct",
+          requestType: "?Neutral\\Rpc\\PayloadObject",
+          requestClass: "Neutral\\Rpc\\PayloadObject",
+          responseType: "?Neutral\\Rpc\\PayloadObject",
+          responseClass: "Neutral\\Rpc\\PayloadObject",
+        }, {
+          name: "NestedEnum",
+          enumCase: "NestedEnum",
+          phpMethod: "nestedEnum",
+          requestType: "?Neutral\\Rpc\\StateObject",
+          requestClass: null,
+          responseType: "?Neutral\\Rpc\\StateObject",
+          responseClass: "Neutral\\Rpc\\StateObject",
+        }],
+      }],
+    });
+    expect(manifestCode).not.toMatch(/\?mixed|\?\?|null\|null|\|null\|null/);
+  });
+
   it("renders enum runtime imports before sorted cross-module payload imports", () => {
     const addressReference = {
       kind: "record",
@@ -618,6 +758,56 @@ describe("generatePhp", () => {
     expect(methodsFile?.code).toContain(
       "responseType: RuntimeType::optional(RuntimeType::array(RuntimeType::int32())),",
     );
+  });
+
+  it("preplans target-specific struct imports once without consulting enums", () => {
+    class StructImportAdapter extends RecordingAdapter {
+      public readonly structImportCalls: string[] = [];
+
+      public override recordClassName(record: NormalizedRecord): string {
+        return record.qualifiedName;
+      }
+
+      public structImports(record: NormalizedRecord): readonly string[] {
+        this.structImportCalls.push(record.identity);
+
+        return ["Neutral\\Runtime\\Data"];
+      }
+
+      public override renderStruct({ record, context }: StructRenderRequest): GeneratedFile {
+        const dataClass = importClass(context.imports, "Neutral\\Runtime\\Data");
+
+        return {
+          path: pathFor(context, `${classNameFor(record, context)}.php`),
+          code: dataClass,
+        };
+      }
+    }
+
+    const adapter = new StructImportAdapter();
+    const files = generatePhp({
+      namespace: "Neutral",
+      modules: [{
+        path: "models/types.skir",
+        records: [{
+          kind: "record",
+          name: "Data",
+          recordType: "struct",
+          fields: [],
+        }, {
+          kind: "record",
+          name: "State",
+          recordType: "enum",
+          fields: [],
+        }],
+      }],
+      adapter,
+    });
+
+    expect(adapter.structImportCalls).toEqual(["models/types.skir::Data"]);
+    expect(files.find((file) => file.path === "Models/Data.php")?.code).toBe("RuntimeData");
+    expect(files.find((file) => file.path === "Models/State.php")?.code)
+      .not.toContain("Skir\\Runtime\\Field");
   });
 
   it("aliases cross-module DTOs that collide with generated RPC sibling classes", () => {
