@@ -20,6 +20,14 @@ export {
   PHP_FILE_HEADER,
   renderPhpFile,
 } from "./php.js";
+export {
+  ComposerAutoloadConflictError,
+  ensureComposerPsr4Mapping,
+  MalformedComposerPsr4PrefixError,
+} from "./composer-autoload.js";
+export { configureComposer } from "./configure-composer.js";
+export { DEFAULT_NAMESPACE, PhpNamespace } from "./config.js";
+export { runConfigureComposerCli } from "./cli.js";
 export type {
   PhpTargetAdapter,
   RenderContext,
@@ -32,6 +40,12 @@ export type {
 export type { ImportRegistry } from "./imports.js";
 export type { PhpNameRegistry } from "./naming.js";
 export type { PhpFileInput } from "./php.js";
+export type {
+  ComposerAutoloadPaths,
+  ComposerPsr4MappingResult,
+} from "./composer-autoload.js";
+export type { ConfigureComposerOptions } from "./configure-composer.js";
+export type { ConfigureComposerCliOptions } from "./cli.js";
 export type {
   ServerManifestMethod,
   ServerManifestModule,
