@@ -1,0 +1,46 @@
+{
+  "name": "@php-skir/generator-core",
+  "version": "0.1.0",
+  "description": "Shared generation core for PHP Skir code generators.",
+  "type": "module",
+  "license": "MIT",
+  "author": {
+    "name": "Maxim Kerstens",
+    "email": "maxim.kerstens@gmail.com"
+  },
+  "homepage": "https://github.com/php-skir/generator-core#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/php-skir/generator-core.git"
+  },
+  "bugs": {
+    "url": "https://github.com/php-skir/generator-core/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
+    "pack:dry-run": "npm pack --dry-run --cache .npm-cache",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "jsonc-parser": "^3.3.1",
+    "skir-internal": "^0.2.21",
+    "yaml": "^2.9.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "vitest": "^4.0.0"
+  }
+}
