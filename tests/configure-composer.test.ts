@@ -1,8 +1,10 @@
 import {
   chmodSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
   readdirSync,
   rmSync,
   statSync,
@@ -10,10 +12,50 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 
 import { z } from "zod";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const filesystemControl = vi.hoisted((): {
+  beforeComposerRevalidation: (() => void) | undefined;
+  composerReadCount: number;
+  renameError: Error | undefined;
+} => ({
+  beforeComposerRevalidation: undefined,
+  composerReadCount: 0,
+  renameError: undefined,
+}));
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const original = await importOriginal<typeof import("node:fs/promises")>();
+
+  return {
+    ...original,
+    readFile: async (...arguments_: Parameters<typeof original.readFile>) => {
+      const [path] = arguments_;
+
+      if (String(path).endsWith(`${sep}composer.json`)) {
+        filesystemControl.composerReadCount += 1;
+
+        if (filesystemControl.composerReadCount === 2) {
+          const beforeComposerRevalidation = filesystemControl.beforeComposerRevalidation;
+          filesystemControl.beforeComposerRevalidation = undefined;
+          beforeComposerRevalidation?.();
+        }
+      }
+
+      return original.readFile(...arguments_);
+    },
+    rename: async (...arguments_: Parameters<typeof original.rename>) => {
+      if (filesystemControl.renameError !== undefined) {
+        throw filesystemControl.renameError;
+      }
+
+      return original.rename(...arguments_);
+    },
+  };
+});
 
 import {
   configureComposer,
@@ -49,6 +91,34 @@ function writeSkirConfig(projectPath: string, lines: readonly string[] = [
   writeFileSync(join(projectPath, "skir.yml"), lines.join("\n"));
 }
 
+function createSymlink(target: string, path: string, type: "dir" | "file"): boolean {
+  try {
+    symlinkSync(
+      target,
+      path,
+      process.platform === "win32" && type === "dir" ? "junction" : type,
+    );
+
+    return true;
+  } catch (error) {
+    if (isUnsupportedSymlinkError(error)) {
+      return false;
+    }
+
+    throw error;
+  }
+}
+
+function isUnsupportedSymlinkError(error: unknown): boolean {
+  if (!(error instanceof Error) || !("code" in error)) {
+    return false;
+  }
+
+  return error.code === "EACCES"
+    || error.code === "EPERM"
+    || error.code === "ENOTSUP";
+}
+
 function configureTestComposer(projectPath?: string, module = TEST_MODULE) {
   return configureComposer({
     module,
@@ -58,9 +128,14 @@ function configureTestComposer(projectPath?: string, module = TEST_MODULE) {
   });
 }
 
+beforeEach(() => {
+  filesystemControl.beforeComposerRevalidation = undefined;
+  filesystemControl.composerReadCount = 0;
+  filesystemControl.renameError = undefined;
+});
+
 afterEach(() => {
   for (const projectPath of projectPaths.splice(0)) {
-    chmodSync(projectPath, 0o700);
     rmSync(projectPath, { recursive: true, force: true });
   }
 });
@@ -267,7 +342,7 @@ describe("configureComposer", () => {
       .rejects.toThrow(/escapes.*root/i);
   });
 
-  it("rejects output directory symlinks that escape the project root", async () => {
+  it("rejects output directory symlinks that escape the project root", async (context) => {
     const projectPath = createProject();
     const outsidePath = createProject();
     writeSkirConfig(projectPath, [
@@ -277,13 +352,16 @@ describe("configureComposer", () => {
       "",
     ]);
     writeFileSync(join(projectPath, "composer.json"), "{}\n");
-    symlinkSync(outsidePath, join(projectPath, "linked-skirout"), "dir");
+    if (!createSymlink(outsidePath, join(projectPath, "linked-skirout"), "dir")) {
+      context.skip();
+      return;
+    }
 
     await expect(configureTestComposer(projectPath))
       .rejects.toThrow(/escapes.*root/i);
   });
 
-  it("rejects a nonexistent output leaf below a symlink escaping the root", async () => {
+  it("rejects a nonexistent output leaf below a symlink escaping the root", async (context) => {
     const projectPath = createProject();
     const outsidePath = createProject();
     writeSkirConfig(projectPath, [
@@ -293,16 +371,26 @@ describe("configureComposer", () => {
       "",
     ]);
     writeFileSync(join(projectPath, "composer.json"), "{}\n");
-    symlinkSync(outsidePath, join(projectPath, "linked"), "dir");
+    if (!createSymlink(outsidePath, join(projectPath, "linked"), "dir")) {
+      context.skip();
+      return;
+    }
 
     await expect(configureTestComposer(projectPath))
       .rejects.toThrow(/escapes.*root/i);
   });
 
-  it("allows an output symlink whose canonical target remains inside the root", async () => {
+  it("allows an output symlink whose canonical target remains inside the root", async (context) => {
     const projectPath = createProject();
     mkdirSync(join(projectPath, "generated", "skirout"), { recursive: true });
-    symlinkSync(join(projectPath, "generated", "skirout"), join(projectPath, "linked-skirout"), "dir");
+    if (!createSymlink(
+      join(projectPath, "generated", "skirout"),
+      join(projectPath, "linked-skirout"),
+      "dir",
+    )) {
+      context.skip();
+      return;
+    }
     writeSkirConfig(projectPath, [
       "generators:",
       `  - mod: ${TEST_MODULE}`,
@@ -341,33 +429,79 @@ describe("configureComposer", () => {
     await expect(configureTestComposer(projectPath)).rejects.toThrow(message);
   });
 
-  it("preserves composer.json permissions during the atomic replacement", async () => {
+  it.runIf(process.platform !== "win32")("preserves exact composer.json permissions despite the process umask", async () => {
+    const projectPath = createProject();
+    const composerPath = join(projectPath, "composer.json");
+    const originalUmask = process.umask(0o022);
+    writeSkirConfig(projectPath);
+    mkdirSync(join(projectPath, "generated", "skirout"), { recursive: true });
+    writeFileSync(composerPath, "{}\n", { mode: 0o666 });
+    chmodSync(composerPath, 0o666);
+
+    try {
+      await configureTestComposer(projectPath);
+    } finally {
+      process.umask(originalUmask);
+    }
+
+    expect(statSync(composerPath).mode & 0o7777).toBe(0o666);
+  });
+
+  it("rejects a symlinked composer.json without touching its link or target", async (context) => {
+    const projectPath = createProject();
+    const targetProjectPath = createProject();
+    const composerPath = join(projectPath, "composer.json");
+    const targetPath = join(targetProjectPath, "outside-composer.json");
+    const source = "{}\n";
+    writeFileSync(targetPath, source);
+    writeSkirConfig(projectPath);
+    mkdirSync(join(projectPath, "generated", "skirout"), { recursive: true });
+
+    if (!createSymlink(targetPath, composerPath, "file")) {
+      context.skip();
+      return;
+    }
+
+    await expect(configureTestComposer(projectPath))
+      .rejects.toThrow(/composer\.json.*symbolic link/i);
+
+    expect(lstatSync(composerPath).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(composerPath)).toBe(targetPath);
+    expect(readFileSync(targetPath, "utf8")).toBe(source);
+  });
+
+  it("aborts an atomic update when composer.json changes after the initial read", async () => {
+    const projectPath = createProject();
+    const composerPath = join(projectPath, "composer.json");
+    const concurrentSource = '{"name":"concurrent/editor"}\n';
+    writeSkirConfig(projectPath);
+    mkdirSync(join(projectPath, "generated", "skirout"), { recursive: true });
+    writeFileSync(composerPath, "{}\n");
+    filesystemControl.beforeComposerRevalidation = () => {
+      writeFileSync(composerPath, concurrentSource);
+    };
+
+    await expect(configureTestComposer(projectPath))
+      .rejects.toThrow(/composer\.json changed during the update/i);
+
+    expect(readFileSync(composerPath, "utf8")).toBe(concurrentSource);
+    expect(readdirSync(projectPath).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("cleans up its temporary file when the atomic rename fails", async () => {
     const projectPath = createProject();
     const composerPath = join(projectPath, "composer.json");
     writeSkirConfig(projectPath);
     mkdirSync(join(projectPath, "generated", "skirout"), { recursive: true });
-    writeFileSync(composerPath, "{}\n", { mode: 0o640 });
+    writeFileSync(composerPath, "{}\n");
+    filesystemControl.renameError = Object.assign(new Error("simulated rename failure"), {
+      code: "EIO",
+    });
 
-    await configureTestComposer(projectPath);
-
-    expect(statSync(composerPath).mode & 0o777).toBe(0o640);
-  });
-
-  it("cleans up its temporary file when an atomic update fails", async () => {
-    const projectPath = createProject();
-    writeSkirConfig(projectPath);
-    mkdirSync(join(projectPath, "generated", "skirout"), { recursive: true });
-    writeFileSync(join(projectPath, "composer.json"), "{}\n");
-    chmodSync(projectPath, 0o500);
-
-    try {
-      await expect(configureTestComposer(projectPath))
-        .rejects.toThrow(/unable to update composer\.json atomically/i);
-    } finally {
-      chmodSync(projectPath, 0o700);
-    }
+    await expect(configureTestComposer(projectPath))
+      .rejects.toThrow(/unable to update composer\.json atomically.*simulated rename failure/i);
 
     expect(readdirSync(projectPath).filter((name) => name.endsWith(".tmp"))).toEqual([]);
-    expect(readFileSync(join(projectPath, "composer.json"), "utf8")).toBe("{}\n");
+    expect(readFileSync(composerPath, "utf8")).toBe("{}\n");
   });
 });

@@ -1,10 +1,11 @@
 import {
+  lstat,
+  open,
   readFile,
   realpath,
   rename,
   stat,
   unlink,
-  writeFile,
 } from "node:fs/promises";
 import {
   dirname,
@@ -35,6 +36,30 @@ interface SkirGeneratorEntry {
   readonly outDir?: unknown;
 }
 
+interface ComposerFileSnapshot {
+  readonly source: string;
+  readonly metadata: FileMetadata;
+}
+
+interface FileMetadata {
+  readonly device: string;
+  readonly inode: string;
+  readonly mode: string;
+  readonly permissions: number;
+  readonly size: string;
+  readonly modifiedAt: string;
+  readonly changedAt: string;
+}
+
+class ComposerFileChangedError extends Error {
+  constructor(path: string) {
+    super(
+      `composer.json changed during the update at ${path}. Re-run configure-composer after resolving the concurrent edit.`,
+    );
+    this.name = "ComposerFileChangedError";
+  }
+}
+
 export async function configureComposer<Config>(
   options: ConfigureComposerOptions<Config>,
 ): Promise<ComposerPsr4MappingResult> {
@@ -42,7 +67,7 @@ export async function configureComposer<Config>(
   const skirConfigPath = join(root, "skir.yml");
   const composerPath = join(root, "composer.json");
   const skirSource = await readRequiredFile(skirConfigPath, "skir.yml");
-  const composerSource = await readRequiredFile(composerPath, "composer.json");
+  const composerFile = await readComposerFile(composerPath);
   const generator = findGenerator(skirSource, options.module);
   const outDirs = parseOutDirs(generator.outDir, options.module);
   const generatorConfig = parseGeneratorConfig(
@@ -52,7 +77,7 @@ export async function configureComposer<Config>(
   );
   const composerPaths = await validateOutputDirectories(root, outDirs);
   const result = ensureComposerPsr4Mapping(
-    composerSource,
+    composerFile.source,
     options.namespace(generatorConfig),
     typeof generator.outDir === "string" ? composerPaths[0]! : composerPaths,
   );
@@ -61,9 +86,38 @@ export async function configureComposer<Config>(
     return result;
   }
 
-  await writeAtomically(composerPath, result.source);
+  await writeAtomically(composerPath, result.source, composerFile);
 
   return result;
+}
+
+async function readComposerFile(path: string): Promise<ComposerFileSnapshot> {
+  let metadata: Awaited<ReturnType<typeof lstat>>;
+
+  try {
+    metadata = await lstat(path);
+  } catch (error) {
+    if (isNodeError(error) && error.code === "ENOENT") {
+      throw new Error(`composer.json was not found at ${path}.`);
+    }
+
+    throw new Error(`Unable to inspect composer.json at ${path}: ${errorMessage(error)}`);
+  }
+
+  if (metadata.isSymbolicLink()) {
+    throw new Error(
+      `composer.json at ${path} is a symbolic link. Replace it with a regular file inside the project root before configuring Composer.`,
+    );
+  }
+
+  if (!metadata.isFile()) {
+    throw new Error(`composer.json at ${path} must be a regular file.`);
+  }
+
+  return {
+    source: await readRequiredFile(path, "composer.json"),
+    metadata: fileMetadata(metadata),
+  };
 }
 
 async function readRequiredFile(path: string, name: string): Promise<string> {
@@ -218,21 +272,87 @@ function ensureContainedPath(root: string, path: string, configuredPath: string)
   }
 }
 
-async function writeAtomically(path: string, source: string): Promise<void> {
-  const metadata = await stat(path);
+async function writeAtomically(
+  path: string,
+  source: string,
+  original: ComposerFileSnapshot,
+): Promise<void> {
   const temporaryPath = `${path}.${process.pid}.${Date.now()}.tmp`;
 
   try {
-    await writeFile(temporaryPath, source, {
-      encoding: "utf8",
-      flag: "wx",
-      mode: metadata.mode,
-    });
+    const temporaryFile = await open(temporaryPath, "wx", 0o600);
+
+    try {
+      await temporaryFile.writeFile(source, "utf8");
+      await temporaryFile.chmod(original.metadata.permissions);
+    } finally {
+      await temporaryFile.close();
+    }
+
+    await ensureComposerFileUnchanged(path, original);
     await rename(temporaryPath, path);
   } catch (error) {
     await unlink(temporaryPath).catch(() => undefined);
+
+    if (error instanceof ComposerFileChangedError) {
+      throw error;
+    }
+
     throw new Error(`Unable to update composer.json atomically: ${errorMessage(error)}`);
   }
+}
+
+async function ensureComposerFileUnchanged(
+  path: string,
+  original: ComposerFileSnapshot,
+): Promise<void> {
+  let currentMetadata: Awaited<ReturnType<typeof lstat>>;
+  let currentSource: string;
+
+  try {
+    currentMetadata = await lstat(path);
+
+    if (currentMetadata.isSymbolicLink() || !currentMetadata.isFile()) {
+      throw new ComposerFileChangedError(path);
+    }
+
+    currentSource = await readFile(path, "utf8");
+  } catch (error) {
+    if (error instanceof ComposerFileChangedError) {
+      throw error;
+    }
+
+    throw new ComposerFileChangedError(path);
+  }
+
+  if (currentSource !== original.source
+    || !fileMetadataMatches(fileMetadata(currentMetadata), original.metadata)) {
+    throw new ComposerFileChangedError(path);
+  }
+}
+
+function fileMetadata(
+  metadata: Awaited<ReturnType<typeof lstat>>,
+): FileMetadata {
+  return {
+    device: String(metadata.dev),
+    inode: String(metadata.ino),
+    mode: String(metadata.mode),
+    permissions: Number(metadata.mode) & 0o7777,
+    size: String(metadata.size),
+    modifiedAt: String(metadata.mtimeMs),
+    changedAt: String(metadata.ctimeMs),
+  };
+}
+
+function fileMetadataMatches(first: FileMetadata, second: FileMetadata): boolean {
+  return first.device === second.device
+    && first.inode === second.inode
+    && first.mode === second.mode
+    && first.permissions === second.permissions
+    && first.size === second.size
+    && first.modifiedAt === second.modifiedAt
+    && first.changedAt === second.changedAt;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
