@@ -30,6 +30,11 @@ export {
 export { configureComposer } from "./configure-composer.js";
 export { DEFAULT_NAMESPACE, PhpNamespace } from "./config.js";
 export { runConfigureComposerCli } from "./cli.js";
+export {
+  resolveValidationRules,
+  ValidationConfig,
+  ValidationRule,
+} from "./validation.js";
 export type {
   PhpTargetAdapter,
   RenderContext,
@@ -48,6 +53,7 @@ export type {
 } from "./composer-autoload.js";
 export type { ConfigureComposerOptions } from "./configure-composer.js";
 export type { ConfigureComposerCliOptions } from "./cli.js";
+export type { ResolvedValidationRules } from "./validation.js";
 export type {
   ServerManifestMethod,
   ServerManifestModule,
