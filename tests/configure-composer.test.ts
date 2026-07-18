@@ -1,5 +1,6 @@
 import {
   chmodSync,
+  existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -18,20 +19,49 @@ import { z } from "zod";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const filesystemControl = vi.hoisted((): {
+  afterTemporaryOpen: ((path: string) => Promise<void>) | undefined;
   beforeComposerRevalidation: (() => void) | undefined;
   composerReadCount: number;
+  randomIdCalls: number;
+  randomIds: string[];
   renameError: Error | undefined;
 } => ({
+  afterTemporaryOpen: undefined,
   beforeComposerRevalidation: undefined,
   composerReadCount: 0,
+  randomIdCalls: 0,
+  randomIds: [],
   renameError: undefined,
 }));
+
+vi.mock("node:crypto", async (importOriginal) => {
+  const original = await importOriginal<typeof import("node:crypto")>();
+
+  return {
+    ...original,
+    randomUUID: () => {
+      filesystemControl.randomIdCalls += 1;
+
+      return filesystemControl.randomIds.shift() ?? original.randomUUID();
+    },
+  };
+});
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const original = await importOriginal<typeof import("node:fs/promises")>();
 
   return {
     ...original,
+    open: async (...arguments_: Parameters<typeof original.open>) => {
+      const [path] = arguments_;
+      const temporaryFile = await original.open(...arguments_);
+
+      if (String(path).endsWith(".tmp")) {
+        await filesystemControl.afterTemporaryOpen?.(String(path));
+      }
+
+      return temporaryFile;
+    },
     readFile: async (...arguments_: Parameters<typeof original.readFile>) => {
       const [path] = arguments_;
 
@@ -91,6 +121,28 @@ function writeSkirConfig(projectPath: string, lines: readonly string[] = [
   writeFileSync(join(projectPath, "skir.yml"), lines.join("\n"));
 }
 
+function prepareValidProject(projectPath: string): void {
+  writeSkirConfig(projectPath);
+  mkdirSync(join(projectPath, "generated", "skirout"), { recursive: true });
+  writeFileSync(join(projectPath, "composer.json"), "{}\n");
+}
+
+function temporaryComposerPath(projectPath: string, randomId: string): string {
+  return join(projectPath, `.composer.json.${randomId}.tmp`);
+}
+
+function createDeferred(): {
+  readonly promise: Promise<void>;
+  readonly resolve: () => void;
+} {
+  let resolvePromise = (): void => undefined;
+  const promise = new Promise<void>((resolve) => {
+    resolvePromise = resolve;
+  });
+
+  return { promise, resolve: resolvePromise };
+}
+
 function createSymlink(target: string, path: string, type: "dir" | "file"): boolean {
   try {
     symlinkSync(
@@ -129,8 +181,11 @@ function configureTestComposer(projectPath?: string, module = TEST_MODULE) {
 }
 
 beforeEach(() => {
+  filesystemControl.afterTemporaryOpen = undefined;
   filesystemControl.beforeComposerRevalidation = undefined;
   filesystemControl.composerReadCount = 0;
+  filesystemControl.randomIdCalls = 0;
+  filesystemControl.randomIds = [];
   filesystemControl.renameError = undefined;
 });
 
@@ -485,6 +540,101 @@ describe("configureComposer", () => {
       .rejects.toThrow(/composer\.json changed during the update/i);
 
     expect(readFileSync(composerPath, "utf8")).toBe(concurrentSource);
+    expect(readdirSync(projectPath).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("preserves a colliding sentinel and retries with a fresh random temporary path", async () => {
+    const projectPath = createProject();
+    const collisionId = "existing-sentinel";
+    const retryId = "owned-retry";
+    const sentinelPath = temporaryComposerPath(projectPath, collisionId);
+    const sentinelSource = "sentinel content\n";
+    prepareValidProject(projectPath);
+    writeFileSync(sentinelPath, sentinelSource);
+    chmodSync(sentinelPath, 0o640);
+    const sentinelMode = statSync(sentinelPath).mode & 0o7777;
+    filesystemControl.randomIds = [collisionId, retryId];
+
+    await configureTestComposer(projectPath);
+
+    expect(filesystemControl.randomIdCalls).toBe(2);
+    expect(readFileSync(sentinelPath, "utf8")).toBe(sentinelSource);
+    expect(statSync(sentinelPath).mode & 0o7777).toBe(sentinelMode);
+    expect(existsSync(temporaryComposerPath(projectPath, retryId))).toBe(false);
+  });
+
+  it("preserves every sentinel and composer.json after bounded random path collisions", async () => {
+    const projectPath = createProject();
+    const collisionIds = Array.from({ length: 8 }, (_, index) => `sentinel-${index}`);
+    const sentinels = collisionIds.map((randomId) => {
+      const path = temporaryComposerPath(projectPath, randomId);
+      const source = `sentinel ${randomId}\n`;
+      writeFileSync(path, source);
+      chmodSync(path, 0o640);
+
+      return {
+        mode: statSync(path).mode & 0o7777,
+        path,
+        source,
+      };
+    });
+    prepareValidProject(projectPath);
+    filesystemControl.randomIds = [...collisionIds];
+
+    await expect(configureTestComposer(projectPath))
+      .rejects.toThrow(/unable to update composer\.json atomically.*unique temporary file.*8 attempts/i);
+
+    expect(filesystemControl.randomIdCalls).toBe(8);
+    expect(readFileSync(join(projectPath, "composer.json"), "utf8")).toBe("{}\n");
+
+    for (const sentinel of sentinels) {
+      expect(readFileSync(sentinel.path, "utf8")).toBe(sentinel.source);
+      expect(statSync(sentinel.path).mode & 0o7777).toBe(sentinel.mode);
+    }
+  });
+
+  it("keeps concurrent invocations from deleting each other's temporary files", async () => {
+    const projectPath = createProject();
+    const firstOpen = createDeferred();
+    const releaseFirst = createDeferred();
+    let temporaryOpenCount = 0;
+    let firstTemporaryPath: string | undefined;
+    prepareValidProject(projectPath);
+    filesystemControl.randomIds = ["shared-id", "shared-id", "second-owned-id"];
+    filesystemControl.afterTemporaryOpen = async (path) => {
+      temporaryOpenCount += 1;
+
+      if (temporaryOpenCount === 1) {
+        firstTemporaryPath = path;
+        firstOpen.resolve();
+        await releaseFirst.promise;
+      }
+    };
+
+    const firstInvocation = configureTestComposer(projectPath);
+    await firstOpen.promise;
+    const secondInvocation = configureTestComposer(projectPath);
+    const secondOutcome = await secondInvocation.then(
+      () => "fulfilled",
+      () => "rejected",
+    );
+
+    if (firstTemporaryPath === undefined) {
+      releaseFirst.resolve();
+      throw new Error("The first invocation did not open a temporary file.");
+    }
+
+    const firstFileSurvivedSecondInvocation = existsSync(firstTemporaryPath);
+    releaseFirst.resolve();
+    const firstOutcome = await firstInvocation.then(
+      () => "fulfilled",
+      () => "rejected",
+    );
+
+    expect(filesystemControl.randomIdCalls).toBe(3);
+    expect(secondOutcome).toBe("fulfilled");
+    expect(firstFileSurvivedSecondInvocation).toBe(true);
+    expect(firstOutcome).toBe("rejected");
     expect(readdirSync(projectPath).filter((name) => name.endsWith(".tmp"))).toEqual([]);
   });
 

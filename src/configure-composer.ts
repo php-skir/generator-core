@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   lstat,
   open,
@@ -8,6 +9,7 @@ import {
   unlink,
 } from "node:fs/promises";
 import {
+  basename,
   dirname,
   isAbsolute,
   join,
@@ -50,6 +52,13 @@ interface FileMetadata {
   readonly modifiedAt: string;
   readonly changedAt: string;
 }
+
+interface OwnedTemporaryFile {
+  readonly file: Awaited<ReturnType<typeof open>>;
+  readonly path: string;
+}
+
+const MAX_TEMPORARY_FILE_ATTEMPTS = 8;
 
 class ComposerFileChangedError extends Error {
   constructor(path: string) {
@@ -277,22 +286,25 @@ async function writeAtomically(
   source: string,
   original: ComposerFileSnapshot,
 ): Promise<void> {
-  const temporaryPath = `${path}.${process.pid}.${Date.now()}.tmp`;
+  let ownedTemporaryFile: OwnedTemporaryFile | undefined;
 
   try {
-    const temporaryFile = await open(temporaryPath, "wx", 0o600);
+    ownedTemporaryFile = await createOwnedTemporaryFile(path);
 
     try {
-      await temporaryFile.writeFile(source, "utf8");
-      await temporaryFile.chmod(original.metadata.permissions);
+      await ownedTemporaryFile.file.writeFile(source, "utf8");
+      await ownedTemporaryFile.file.chmod(original.metadata.permissions);
     } finally {
-      await temporaryFile.close();
+      await ownedTemporaryFile.file.close();
     }
 
     await ensureComposerFileUnchanged(path, original);
-    await rename(temporaryPath, path);
+    await rename(ownedTemporaryFile.path, path);
+    ownedTemporaryFile = undefined;
   } catch (error) {
-    await unlink(temporaryPath).catch(() => undefined);
+    if (ownedTemporaryFile !== undefined) {
+      await unlink(ownedTemporaryFile.path).catch(() => undefined);
+    }
 
     if (error instanceof ComposerFileChangedError) {
       throw error;
@@ -300,6 +312,32 @@ async function writeAtomically(
 
     throw new Error(`Unable to update composer.json atomically: ${errorMessage(error)}`);
   }
+}
+
+async function createOwnedTemporaryFile(path: string): Promise<OwnedTemporaryFile> {
+  for (let attempt = 0; attempt < MAX_TEMPORARY_FILE_ATTEMPTS; attempt += 1) {
+    const temporaryPath = join(
+      dirname(path),
+      `.${basename(path)}.${randomUUID()}.tmp`,
+    );
+
+    try {
+      return {
+        file: await open(temporaryPath, "wx", 0o600),
+        path: temporaryPath,
+      };
+    } catch (error) {
+      if (isNodeError(error) && error.code === "EEXIST") {
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  throw new Error(
+    `Unable to create a unique temporary file for composer.json after ${MAX_TEMPORARY_FILE_ATTEMPTS} attempts.`,
+  );
 }
 
 async function ensureComposerFileUnchanged(
