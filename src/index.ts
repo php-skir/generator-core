@@ -6,3 +6,30 @@ export const PHP_FILE_HEADER = [
   " * +------------------------------------------------------------+",
   " */",
 ].join("\n");
+
+export { normalizeSchema } from "./normalize.js";
+export {
+  buildPhpNameRegistry,
+  toClassName,
+  toPhpNamespaceSegment,
+  toPropertyName,
+} from "./naming.js";
+export type { PhpNameRegistry } from "./naming.js";
+export type {
+  CoreGeneratorInput,
+  GeneratedFile,
+  NormalizedField,
+  NormalizedMethod,
+  NormalizedModule,
+  NormalizedRecord,
+  NormalizedSchema,
+  NormalizedType,
+  SkirField,
+  SkirMethod,
+  SkirModule,
+  SkirRecord,
+  SkirRecordLocation,
+  SkirRecordNamePart,
+  SkirToken,
+  SkirType,
+} from "./model.js";

@@ -1,0 +1,137 @@
+import type { NormalizedRecord, NormalizedSchema } from "./model.js";
+
+export interface PhpNameRegistry {
+  readonly namesByIdentity: ReadonlyMap<string, string>;
+  readonly namesByRecordKey: ReadonlyMap<string, string>;
+}
+
+interface NameCandidate {
+  readonly record: NormalizedRecord;
+  readonly namespace: string;
+  readonly baseClassName: string;
+}
+
+export function buildPhpNameRegistry(
+  rootNamespace: string,
+  schema: NormalizedSchema,
+  recordClassName: (record: NormalizedRecord) => string,
+): PhpNameRegistry {
+  const moduleByPath = new Map(schema.modules.map((module) => [module.path, module]));
+  const candidates: NameCandidate[] = [];
+  const candidatesByCaseInsensitiveName = new Map<string, NameCandidate>();
+
+  for (const record of schema.recordsByIdentity.values()) {
+    const module = moduleByPath.get(record.modulePath);
+
+    if (module === undefined) {
+      throw new Error(`No normalized module exists for record ${record.identity}.`);
+    }
+
+    const baseClassName = recordClassName(record);
+
+    if (baseClassName === "") {
+      throw new Error(`The PHP class name for record ${record.identity} is empty.`);
+    }
+
+    const namespace = [rootNamespace, ...module.namespaceSegments]
+      .filter((segment) => segment !== "")
+      .join("\\");
+    const candidate = { record, namespace, baseClassName };
+    const caseInsensitiveKey = `${namespace}\\${baseClassName}`.toLowerCase();
+    const caseInsensitiveMatch = candidatesByCaseInsensitiveName.get(caseInsensitiveKey);
+
+    if (
+      caseInsensitiveMatch !== undefined
+      && `${caseInsensitiveMatch.namespace}\\${caseInsensitiveMatch.baseClassName}`
+        !== `${namespace}\\${baseClassName}`
+    ) {
+      throw new Error(
+        `Case-insensitive PHP class collision: ${caseInsensitiveMatch.namespace}\\${caseInsensitiveMatch.baseClassName} and ${namespace}\\${baseClassName}.`,
+      );
+    }
+
+    candidatesByCaseInsensitiveName.set(caseInsensitiveKey, candidate);
+    candidates.push(candidate);
+  }
+
+  const exactGroups = new Map<string, NameCandidate[]>();
+
+  for (const candidate of candidates) {
+    const key = `${candidate.namespace}\\${candidate.baseClassName}`;
+    const group = exactGroups.get(key);
+
+    if (group === undefined) {
+      exactGroups.set(key, [candidate]);
+    } else {
+      group.push(candidate);
+    }
+  }
+
+  const namesByIdentity = new Map<string, string>();
+  const namesByRecordKey = new Map<string, string>();
+  const classNamesByIdentity = new Map<string, string>();
+  const emittedNames = new Map<string, { readonly identity: string; readonly qualifiedName: string }>();
+
+  for (const group of exactGroups.values()) {
+    for (const candidate of group) {
+      const className = group.length === 1
+        ? candidate.baseClassName
+        : `${moduleClassPrefix(candidate.record.modulePath)}${candidate.baseClassName}`;
+
+      classNamesByIdentity.set(candidate.record.identity, className);
+    }
+  }
+
+  for (const candidate of candidates) {
+    const className = classNamesByIdentity.get(candidate.record.identity);
+
+    if (className === undefined) {
+      throw new Error(`No PHP class name was resolved for record ${candidate.record.identity}.`);
+    }
+
+    const emittedKey = `${candidate.namespace}\\${className}`.toLowerCase();
+    const existing = emittedNames.get(emittedKey);
+
+    if (existing !== undefined) {
+      throw new Error(
+        `PHP class collision after deterministic prefixing: records ${existing.identity} and ${candidate.record.identity} both produce ${candidate.namespace}\\${className}.`,
+      );
+    }
+
+    emittedNames.set(emittedKey, {
+      identity: candidate.record.identity,
+      qualifiedName: `${candidate.namespace}\\${className}`,
+    });
+    namesByIdentity.set(candidate.record.identity, className);
+
+    if (candidate.record.key !== undefined) {
+      namesByRecordKey.set(candidate.record.key, className);
+    }
+  }
+
+  return { namesByIdentity, namesByRecordKey };
+}
+
+export function toClassName(name: string): string {
+  return name
+    .split(/[_\-\s]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join("");
+}
+
+export function toPropertyName(name: string): string {
+  const className = toClassName(name);
+
+  return className.charAt(0).toLowerCase() + className.slice(1);
+}
+
+export function toPhpNamespaceSegment(name: string): string {
+  return toClassName(name.replace(/[^A-Za-z0-9]+/g, "_"));
+}
+
+function moduleClassPrefix(modulePath: string): string {
+  const moduleFileName = modulePath.split("/").at(-1) ?? modulePath;
+
+  return toClassName(moduleFileName.replace(/\.skir$/, ""));
+}
