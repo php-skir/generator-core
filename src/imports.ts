@@ -200,6 +200,76 @@ export function importClass(
   return alias;
 }
 
+export function importClassAs(
+  registry: ImportRegistry,
+  fullyQualifiedClassName: string,
+  localName: string,
+): string {
+  const state = registryState(registry);
+  const canonicalClassName = canonicalFullyQualifiedClassName(fullyQualifiedClassName);
+  const classNameKey = canonicalClassName.toLowerCase();
+
+  assertValidLocalName(localName, `Invalid PHP import alias "${localName}"`);
+
+  const caseInsensitiveClass = state.canonicalClassesByKey.get(classNameKey);
+
+  if (
+    caseInsensitiveClass !== undefined
+    && caseInsensitiveClass !== canonicalClassName
+  ) {
+    throwCaseInsensitiveClassError(caseInsensitiveClass, canonicalClassName);
+  }
+
+  const existingAlias = findImportByClassName(state.imports, canonicalClassName);
+
+  if (existingAlias !== undefined) {
+    if (existingAlias === localName) {
+      return localName;
+    }
+
+    throw new Error(
+      `Cannot import ${canonicalClassName} as ${localName}: it is already imported as ${existingAlias}; cannot also import it as ${localName}. Reuse the existing alias.`,
+    );
+  }
+
+  const localNameKey = localName.toLowerCase();
+
+  if (state.reservedNameKeys.has(localNameKey)) {
+    throw new Error(
+      `Cannot import ${canonicalClassName}: alias ${localName} is reserved by this import registry. Choose another alias.`,
+    );
+  }
+
+  const occupiedImport = findImportByAliasKey(state.imports, localNameKey);
+
+  if (occupiedImport !== undefined) {
+    throw new Error(
+      `Cannot import ${canonicalClassName}: alias ${localName} is already used for ${occupiedImport.fullyQualifiedClassName}. Choose another alias.`,
+    );
+  }
+
+  const plannedClassName = findPlannedClassByAliasKey(
+    state.aliasesByPlannedClass,
+    localNameKey,
+  );
+
+  if (
+    plannedClassName !== undefined
+    && plannedClassName !== canonicalClassName
+  ) {
+    throw new Error(
+      `Cannot import ${canonicalClassName}: alias ${localName} is planned for ${plannedClassName}. Choose another alias so the planned import remains stable.`,
+    );
+  }
+
+  state.imports.set(localName, canonicalClassName);
+  state.canonicalClassesByKey.set(classNameKey, canonicalClassName);
+  addClassShortName(state.classNamesByShortName, canonicalClassName);
+  state.allocatedAliasKeys.add(localNameKey);
+
+  return localName;
+}
+
 export function renderUseStatements(registry: ImportRegistry): readonly string[] {
   const state = registryState(registry);
 
@@ -399,6 +469,32 @@ function findImportByClassName(
   for (const [alias, importedClassName] of imports) {
     if (importedClassName === fullyQualifiedClassName) {
       return alias;
+    }
+  }
+
+  return undefined;
+}
+
+function findImportByAliasKey(
+  imports: ReadonlyMap<string, string>,
+  aliasKey: string,
+): { readonly alias: string; readonly fullyQualifiedClassName: string } | undefined {
+  for (const [alias, fullyQualifiedClassName] of imports) {
+    if (alias.toLowerCase() === aliasKey) {
+      return { alias, fullyQualifiedClassName };
+    }
+  }
+
+  return undefined;
+}
+
+function findPlannedClassByAliasKey(
+  aliasesByPlannedClass: ReadonlyMap<string, string>,
+  aliasKey: string,
+): string | undefined {
+  for (const [fullyQualifiedClassName, alias] of aliasesByPlannedClass) {
+    if (alias.toLowerCase() === aliasKey) {
+      return fullyQualifiedClassName;
     }
   }
 

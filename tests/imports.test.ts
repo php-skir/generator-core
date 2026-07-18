@@ -3,6 +3,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   createImportRegistry,
   importClass,
+  importClassAs,
   indent,
   PHP_FILE_HEADER,
   renderPhpFile,
@@ -47,6 +48,122 @@ describe("PHP imports", () => {
       "use Skir\\Common\\Address as CommonAddress;",
     ]);
     expect(renderUseStatements(reverse)).toEqual(renderUseStatements(forward));
+  });
+
+  it("allows an adapter to override an unused planned alias explicitly", () => {
+    const commonAddress = "Skir\\Common\\Address";
+    const billingAddress = "Skir\\Billing\\Address";
+    const registry = createImportRegistry([], [commonAddress, billingAddress]);
+
+    expect(importClassAs(registry, commonAddress, "Address")).toBe("Address");
+    expect(importClass(registry, commonAddress)).toBe("Address");
+    expect(renderUseStatements(registry)).toEqual([
+      "use Skir\\Common\\Address;",
+    ]);
+  });
+
+  it("keeps other planned aliases stable after an explicit override", () => {
+    const commonAddress = "Skir\\Common\\Address";
+    const billingAddress = "Skir\\Billing\\Address";
+    const registry = createImportRegistry([], [commonAddress, billingAddress]);
+
+    expect(importClassAs(registry, commonAddress, "Address")).toBe("Address");
+    expect(importClass(registry, billingAddress)).toBe("BillingAddress");
+    expect(renderUseStatements(registry)).toEqual([
+      "use Skir\\Billing\\Address as BillingAddress;",
+      "use Skir\\Common\\Address;",
+    ]);
+  });
+
+  it("returns the same explicit alias idempotently", () => {
+    const registry = createImportRegistry([]);
+
+    expect(importClassAs(registry, "Skir\\Common\\Address", "Address")).toBe("Address");
+    expect(importClassAs(registry, "\\Skir\\Common\\Address", "Address")).toBe("Address");
+    expect(renderUseStatements(registry)).toEqual([
+      "use Skir\\Common\\Address;",
+    ]);
+  });
+
+  it("rejects explicit aliases reserved by the registry", () => {
+    const registry = createImportRegistry(["Address"]);
+
+    expect(() => importClassAs(registry, "Skir\\Common\\Address", "address")).toThrow(
+      /alias.*address.*reserved/i,
+    );
+    expect(renderUseStatements(registry)).toEqual([]);
+  });
+
+  it.each(["Bad-Name", "match"])(
+    "rejects invalid or PHP-reserved explicit alias %s",
+    (localName) => {
+      const registry = createImportRegistry([]);
+
+      expect(() => importClassAs(registry, "Skir\\Common\\Address", localName)).toThrow(
+        /invalid PHP import alias|reserved PHP name/i,
+      );
+      expect(renderUseStatements(registry)).toEqual([]);
+    },
+  );
+
+  it("rejects an explicit alias occupied case-insensitively by another import", () => {
+    const registry = createImportRegistry([]);
+
+    importClassAs(registry, "Skir\\Common\\Address", "Address");
+
+    expect(() => importClassAs(registry, "Skir\\Billing\\Address", "address")).toThrow(
+      /alias.*address.*already.*Skir\\Common\\Address/i,
+    );
+    expect(renderUseStatements(registry)).toEqual([
+      "use Skir\\Common\\Address;",
+    ]);
+  });
+
+  it("rejects a second used alias for the same class", () => {
+    const registry = createImportRegistry([]);
+
+    importClassAs(registry, "Skir\\Common\\Address", "Address");
+
+    expect(() => importClassAs(registry, "Skir\\Common\\Address", "CommonAddress")).toThrow(
+      /Skir\\Common\\Address.*already imported as Address.*CommonAddress/i,
+    );
+    expect(renderUseStatements(registry)).toEqual([
+      "use Skir\\Common\\Address;",
+    ]);
+  });
+
+  it("rejects an alias planned for another class without destabilizing the plan", () => {
+    const commonAddress = "Skir\\Common\\Address";
+    const billingAddress = "Skir\\Billing\\Address";
+    const registry = createImportRegistry([], [commonAddress, billingAddress]);
+
+    expect(() => importClassAs(registry, commonAddress, "BillingAddress")).toThrow(
+      /alias.*BillingAddress.*planned.*Skir\\Billing\\Address/i,
+    );
+    expect(importClass(registry, commonAddress)).toBe("CommonAddress");
+    expect(importClass(registry, billingAddress)).toBe("BillingAddress");
+  });
+
+  it("rejects invalid and case-conflicting explicit class names", () => {
+    const registry = createImportRegistry([], ["Skir\\Common\\Address"]);
+
+    expect(() => importClassAs(registry, "Skir\\Bad-Name", "Address")).toThrow(
+      /invalid PHP fully qualified class name.*Bad-Name/i,
+    );
+    expect(() => importClassAs(registry, "skir\\common\\address", "Address")).toThrow(
+      /same case-insensitive PHP class.*Skir\\Common\\Address.*skir\\common\\address/i,
+    );
+  });
+
+  it("rejects a forged registry for explicit aliases", () => {
+    const injectedRegistry: ImportRegistry = {
+      reservedNames: new Set(),
+      imports: new Map(),
+    };
+
+    expect(() => importClassAs(injectedRegistry, "Skir\\Common\\Address", "Address")).toThrow(
+      /registry.*createImportRegistry/i,
+    );
   });
 
   it("rejects an unplanned late basename collision that cannot be remapped safely", () => {

@@ -14,6 +14,7 @@ export {
 export {
   createImportRegistry,
   importClass,
+  importClassAs,
   renderUseStatements,
 } from "./imports.js";
 export {
