@@ -239,9 +239,12 @@ describe("generatePhp", () => {
 
     const rpcFiles = first.filter((file) => file.path.startsWith("Admin/"))
       .filter((file) => file.path.includes("Skir"));
+    const methodsFile = first.find((file) => file.path === "Admin/SkirMethods.php");
 
     expect(rpcFiles).toHaveLength(6);
     expect(first.filter((file) => file.path.startsWith("Common/Skir"))).toHaveLength(0);
+    expect(methodsFile?.code).toContain("use Skir\\Runtime\\Type;");
+    expect(methodsFile?.code).toContain("responseType: Type::timestamp(),");
 
     const manifestFile = first.at(-1);
 
@@ -307,6 +310,86 @@ describe("generatePhp", () => {
       path: "skir-server-manifest.json",
       code: "{\n  \"version\": 1,\n  \"generator\": \"neutral-adapter\",\n  \"modules\": []\n}\n",
     }]);
+  });
+
+  it("does not import the runtime Type when all descriptors are direct records", () => {
+    const recordReference = {
+      kind: "record",
+      key: "direct-record-key",
+      recordType: "struct" as const,
+    };
+    const files = generatePhp({
+      namespace: "Neutral",
+      modules: [{
+        path: "rpc/direct.skir",
+        records: [{
+          kind: "record",
+          key: "direct-record-key",
+          name: "DirectRecord",
+          recordType: "struct",
+          fields: [],
+        }],
+        methods: [{
+          kind: "method",
+          name: "Echo",
+          number: 1,
+          requestType: recordReference,
+          responseType: recordReference,
+        }],
+      }],
+      adapter: new RecordingAdapter(),
+    });
+    const methodsFile = files.find((file) => file.path === "Rpc/SkirMethods.php");
+
+    expect(methodsFile?.code).not.toContain("use Skir\\Runtime\\Type");
+    expect(methodsFile?.code).not.toContain("Type::");
+    expect(methodsFile?.code).toContain("DirectRecordObject::skirType()");
+  });
+
+  it("aliases the runtime Type when a planned generated class reserves its basename", () => {
+    class TypeCollisionAdapter extends RecordingAdapter {
+      public override recordClassName(record: NormalizedRecord): string {
+        this.calls.push(`class:${record.identity}`);
+
+        return record.qualifiedName === "Type"
+          ? "Type"
+          : super.recordClassName(record);
+      }
+    }
+
+    const files = generatePhp({
+      namespace: "Neutral",
+      modules: [{
+        path: "models/type.skir",
+        records: [{
+          kind: "record",
+          key: "type-key",
+          name: "Type",
+          recordType: "struct",
+          fields: [],
+        }],
+      }, {
+        path: "rpc/primitives.skir",
+        methods: [{
+          kind: "method",
+          name: "Echo",
+          number: 1,
+          requestType: "string",
+          responseType: {
+            kind: "optional",
+            other: { kind: "array", item: "int32" },
+          },
+        }],
+      }],
+      adapter: new TypeCollisionAdapter(),
+    });
+    const methodsFile = files.find((file) => file.path === "Rpc/SkirMethods.php");
+
+    expect(methodsFile?.code).toContain("use Skir\\Runtime\\Type as RuntimeType;");
+    expect(methodsFile?.code).toContain("requestType: RuntimeType::string(),");
+    expect(methodsFile?.code).toContain(
+      "responseType: RuntimeType::optional(RuntimeType::array(RuntimeType::int32())),",
+    );
   });
 
   it("rejects duplicate generated output paths with the colliding path", () => {

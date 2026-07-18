@@ -47,12 +47,27 @@ export function methodEnumClassName(module: NormalizedModule): string {
 }
 
 function renderMethodsFile(input: RenderRpcInput): GeneratedFile {
-  const context = createFileContext(input, "SkirMethods", [
+  const requiresRuntimeType = input.methods.some((method) => (
+    descriptorRequiresRuntimeType(method.requestType)
+    || descriptorRequiresRuntimeType(method.responseType)
+  ));
+  const runtimeImports = [
     "Skir\\Runtime\\MethodDescriptor",
-  ]);
+    ...(requiresRuntimeType ? ["Skir\\Runtime\\Type"] : []),
+  ];
+  const context = createFileContext(input, "SkirMethods", runtimeImports);
   const methodDescriptor = importClass(context.imports, "Skir\\Runtime\\MethodDescriptor");
+  const typeClass = requiresRuntimeType
+    ? importClass(context.imports, "Skir\\Runtime\\Type")
+    : null;
   const descriptors = input.methods
-    .map((method) => renderMethodDescriptor(method, context, input.adapter, methodDescriptor))
+    .map((method) => renderMethodDescriptor(
+      method,
+      context,
+      input.adapter,
+      methodDescriptor,
+      typeClass,
+    ))
     .join("\n\n");
   const body = [
     "final readonly class SkirMethods",
@@ -122,6 +137,7 @@ function renderMethodDescriptor(
   context: RenderContext,
   adapter: PhpTargetAdapter,
   methodDescriptor: string,
+  typeClass: string | null,
 ): string {
   return [
     `public static function ${toPropertyName(method.name)}(): ${methodDescriptor}`,
@@ -129,8 +145,8 @@ function renderMethodDescriptor(
     `    return new ${methodDescriptor}(`,
     `        name: '${method.name}',`,
     `        number: ${method.number},`,
-    `        requestType: ${runtimeTypeExpression(method.requestType, context, adapter)},`,
-    `        responseType: ${runtimeTypeExpression(method.responseType, context, adapter)},`,
+    `        requestType: ${runtimeTypeExpression(method.requestType, context, adapter, typeClass)},`,
+    `        responseType: ${runtimeTypeExpression(method.responseType, context, adapter, typeClass)},`,
     "    );",
     "}",
   ].join("\n");
@@ -320,20 +336,29 @@ function runtimeTypeExpression(
   type: NormalizedType,
   context: RenderContext,
   adapter: PhpTargetAdapter,
+  typeClass: string | null,
 ): string {
-  if (type.kind === "array") {
-    return `Type::array(${runtimeTypeExpression(type.item, context, adapter)})`;
-  }
-
-  if (type.kind === "optional") {
-    return `Type::optional(${runtimeTypeExpression(type.inner, context, adapter)})`;
-  }
-
   if (type.kind === "record") {
     return `${adapter.phpType(type, context)}::skirType()`;
   }
 
-  return `Type::${type.kind}()`;
+  if (typeClass === null) {
+    throw new Error(`Runtime Type import is missing for ${type.kind} method descriptor.`);
+  }
+
+  if (type.kind === "array") {
+    return `${typeClass}::array(${runtimeTypeExpression(type.item, context, adapter, typeClass)})`;
+  }
+
+  if (type.kind === "optional") {
+    return `${typeClass}::optional(${runtimeTypeExpression(type.inner, context, adapter, typeClass)})`;
+  }
+
+  return `${typeClass}::${type.kind}()`;
+}
+
+function descriptorRequiresRuntimeType(type: NormalizedType): boolean {
+  return type.kind !== "record";
 }
 
 function createFileContext(
