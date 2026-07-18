@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 
 import {
   createImportRegistry,
@@ -7,6 +7,7 @@ import {
   PHP_FILE_HEADER,
   renderPhpFile,
   renderUseStatements,
+  type ImportRegistry,
 } from "../src/index.js";
 
 describe("PHP imports", () => {
@@ -31,15 +32,30 @@ describe("PHP imports", () => {
     ]);
   });
 
-  it("assigns unique aliases to cross-module records with the same short name", () => {
+  it("plans colliding aliases independently of planning and lookup order", () => {
+    const commonAddress = "Skir\\Common\\Address";
+    const billingAddress = "Skir\\Billing\\Address";
+    const forward = createImportRegistry([], [commonAddress, billingAddress]);
+    const reverse = createImportRegistry([], [billingAddress, commonAddress]);
+
+    expect(importClass(forward, commonAddress)).toBe("CommonAddress");
+    expect(importClass(forward, billingAddress)).toBe("BillingAddress");
+    expect(importClass(reverse, billingAddress)).toBe("BillingAddress");
+    expect(importClass(reverse, commonAddress)).toBe("CommonAddress");
+    expect(renderUseStatements(forward)).toEqual([
+      "use Skir\\Billing\\Address as BillingAddress;",
+      "use Skir\\Common\\Address as CommonAddress;",
+    ]);
+    expect(renderUseStatements(reverse)).toEqual(renderUseStatements(forward));
+  });
+
+  it("rejects an unplanned late basename collision that cannot be remapped safely", () => {
     const registry = createImportRegistry([]);
 
     expect(importClass(registry, "Skir\\Common\\Address")).toBe("Address");
-    expect(importClass(registry, "Skir\\Billing\\Address")).toBe("BillingAddress");
-    expect(renderUseStatements(registry)).toEqual([
-      "use Skir\\Billing\\Address as BillingAddress;",
-      "use Skir\\Common\\Address;",
-    ]);
+    expect(() => importClass(registry, "Skir\\Billing\\Address")).toThrow(
+      /preplan.*colliding imports.*createImportRegistry/i,
+    );
   });
 
   it("sorts use statements independently of import lookup order", () => {
@@ -70,6 +86,54 @@ describe("PHP imports", () => {
     const aliases = [...registry.imports.keys()].map((alias) => alias.toLowerCase());
 
     expect(new Set(aliases).size).toBe(aliases.length);
+  });
+
+  it("exposes imports as a runtime read-only view", () => {
+    const registry = createImportRegistry([]);
+
+    expectTypeOf(registry.imports).toEqualTypeOf<ReadonlyMap<string, string>>();
+    expect("set" in registry.imports).toBe(false);
+    expect("delete" in registry.imports).toBe(false);
+    expect("clear" in registry.imports).toBe(false);
+
+    importClass(registry, "Skir\\Common\\Address");
+
+    expect(registry.imports.get("Address")).toBe("Skir\\Common\\Address");
+  });
+
+  it("rejects structurally injected import state", () => {
+    const injectedRegistry: ImportRegistry = {
+      reservedNames: new Set(),
+      imports: new Map([["Match", "Vendor\\Match"]]),
+    };
+
+    expect(() => renderUseStatements(injectedRegistry)).toThrow(
+      /registry.*createImportRegistry/i,
+    );
+  });
+
+  it("rejects PHP reserved class names case-insensitively", () => {
+    for (const reservedClassName of ["Match", "ENUM", "class", "Interface", "trait"]) {
+      const registry = createImportRegistry([]);
+
+      expect(() => importClass(registry, `Vendor\\${reservedClassName}`)).toThrow(
+        new RegExp(`terminal class segment.*${reservedClassName}.*reserved`, "i"),
+      );
+    }
+
+    expect(() => createImportRegistry(["trait"])).toThrow(/reserved PHP name.*trait/i);
+  });
+
+  it("skips reserved namespace-derived alias candidates", () => {
+    const registry = createImportRegistry(
+      ["ch"],
+      ["Vendor\\Mat\\ch"],
+    );
+
+    expect(importClass(registry, "Vendor\\Mat\\ch")).toBe("VendorMatCh");
+    expect(renderUseStatements(registry)).toEqual([
+      "use Vendor\\Mat\\ch as VendorMatCh;",
+    ]);
   });
 
   it("rejects empty and invalid fully qualified class names with actionable errors", () => {
