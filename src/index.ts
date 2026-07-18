@@ -1,4 +1,9 @@
 export { normalizeSchema } from "./normalize.js";
+export { generateNormalizedPhp, generatePhp } from "./generate.js";
+export {
+  generateServerManifestFile,
+  SERVER_MANIFEST_VERSION,
+} from "./server-manifest.js";
 export {
   buildPhpNameRegistry,
   toClassName,
@@ -20,9 +25,17 @@ export type {
   RenderContext,
   StructRenderRequest,
 } from "./adapter.js";
+export type {
+  GenerateNormalizedPhpInput,
+  GeneratePhpInput,
+} from "./generate.js";
 export type { ImportRegistry } from "./imports.js";
 export type { PhpNameRegistry } from "./naming.js";
 export type { PhpFileInput } from "./php.js";
+export type {
+  ServerManifestMethod,
+  ServerManifestModule,
+} from "./server-manifest.js";
 export type {
   CoreGeneratorInput,
   GeneratedFile,
