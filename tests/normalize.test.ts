@@ -537,6 +537,33 @@ describe("normalizeSchema", () => {
     })).toThrow(/admin\/users\.skir::User.*GeneratedUser.*ConflictingUser/i);
   });
 
+  it("retains authoritative PHP class metadata when the generated record omits it", () => {
+    const generatedUser: SkirRecord = {
+      kind: "record",
+      name: token("User"),
+      recordType: "struct",
+      fields: [],
+    };
+    const authoritativeUser: SkirRecord = {
+      ...generatedUser,
+      phpClassName: "AuthoritativeUser",
+    };
+    const schema = normalizeSchema({
+      modules: [{ path: "admin/users.skir", records: [generatedUser] }],
+      recordMap: new Map([["user-key", {
+        kind: "record-location",
+        record: authoritativeUser,
+        recordAncestors: [authoritativeUser],
+        modulePath: "admin/users.skir",
+      }]]),
+    });
+    const normalizedUser = schema.modules[0]?.records[0];
+
+    expect(normalizedUser?.phpClassName).toBe("AuthoritativeUser");
+    expect(schema.recordsByIdentity.get("admin/users.skir::User")).toBe(normalizedUser);
+    expect(schema.recordsByKey.get("user-key")).toBe(normalizedUser);
+  });
+
   it("rejects conflicting authoritative map keys and record types", () => {
     const generatedUser: SkirRecord = {
       kind: "record",

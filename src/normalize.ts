@@ -110,7 +110,11 @@ export function normalizeSchema(input: CoreGeneratorInput): NormalizedSchema {
         `Record map location for key "${mapKey}" resolves to ${source.identity}, whose normalized record is ${existing.recordType}, but the location record is ${source.recordType}.`,
       );
     } else {
-      assertCompatiblePhpClassName(existing, source, mapKey);
+      assertCompatiblePhpClassName(
+        existing,
+        source,
+        `Record map location for key "${mapKey}"`,
+      );
 
       if (existing.phpClassName === undefined && source.phpClassName !== undefined) {
         recordsByIdentity.set(source.identity, {
@@ -137,12 +141,21 @@ export function normalizeSchema(input: CoreGeneratorInput): NormalizedSchema {
     }
 
     const records = (sourcesByModule[moduleIndex] ?? []).map((source) => {
+      const indexedRecord = recordsByIdentity.get(source.identity);
+
+      if (indexedRecord === undefined) {
+        throw new Error(`No indexed normalized record exists for ${source.identity}.`);
+      }
+
+      assertCompatiblePhpClassName(indexedRecord, source, "Generated record");
+
       const context: NormalizationContext = {
         recordsByIdentity,
         recordsByKey,
         currentModulePath: source.modulePath,
         description: `record ${source.identity}`,
       };
+      const phpClassName = source.phpClassName ?? indexedRecord.phpClassName;
       const normalized: NormalizedRecord = {
         identity: source.identity,
         modulePath: source.modulePath,
@@ -150,7 +163,7 @@ export function normalizeSchema(input: CoreGeneratorInput): NormalizedSchema {
         recordType: source.recordType,
         fields: normalizeFields(source.record, source.recordType, context),
         ...(source.key === undefined ? {} : { key: source.key }),
-        ...(source.phpClassName === undefined ? {} : { phpClassName: source.phpClassName }),
+        ...(phpClassName === undefined ? {} : { phpClassName }),
       };
 
       finalRecordsByIdentity.set(normalized.identity, normalized);
@@ -269,7 +282,7 @@ function recordMapSource(
 function assertCompatiblePhpClassName(
   existing: NormalizedRecord,
   source: RecordSource,
-  mapKey: string,
+  sourceDescription: string,
 ): void {
   if (
     existing.phpClassName !== undefined
@@ -277,7 +290,7 @@ function assertCompatiblePhpClassName(
     && existing.phpClassName !== source.phpClassName
   ) {
     throw new Error(
-      `Record map location for key "${mapKey}" resolves to ${source.identity} with incompatible PHP class names "${existing.phpClassName}" and "${source.phpClassName}".`,
+      `${sourceDescription} resolves to ${source.identity} with incompatible PHP class names "${existing.phpClassName}" and "${source.phpClassName}".`,
     );
   }
 }
