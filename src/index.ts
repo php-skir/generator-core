@@ -18,6 +18,7 @@ export type { PhpNameRegistry } from "./naming.js";
 export type {
   CoreGeneratorInput,
   GeneratedFile,
+  NormalizedEnumConstant,
   NormalizedField,
   NormalizedMethod,
   NormalizedModule,

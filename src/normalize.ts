@@ -1,5 +1,6 @@
 import type {
   CoreGeneratorInput,
+  NormalizedEnumConstant,
   NormalizedField,
   NormalizedMethod,
   NormalizedModule,
@@ -111,7 +112,7 @@ export function normalizeSchema(input: CoreGeneratorInput): NormalizedSchema {
         modulePath: source.modulePath,
         qualifiedName: source.qualifiedName,
         recordType: source.recordType,
-        fields: normalizeFields(source.record, context),
+        fields: normalizeFields(source.record, source.recordType, context),
         ...(source.key === undefined ? {} : { key: source.key }),
       };
 
@@ -216,9 +217,18 @@ function qualifiedNameForLocation(location: SkirRecordLocation): string {
 
 function normalizeFields(
   record: SkirRecord,
+  recordType: "struct" | "enum",
   context: NormalizationContext,
-): readonly (NormalizedField | { readonly kind: "removed"; readonly number: number })[] {
-  const fields: (NormalizedField | { readonly kind: "removed"; readonly number: number })[] = [];
+): readonly (
+  | NormalizedField
+  | NormalizedEnumConstant
+  | { readonly kind: "removed"; readonly number: number }
+)[] {
+  const fields: (
+    | NormalizedField
+    | NormalizedEnumConstant
+    | { readonly kind: "removed"; readonly number: number }
+  )[] = [];
   const usedNumbers = new Set<number>();
 
   for (const field of record.fields ?? []) {
@@ -227,7 +237,7 @@ function normalizeFields(
     }
 
     usedNumbers.add(field.number);
-    fields.push(normalizeField(field, context));
+    fields.push(normalizeField(field, recordType, context));
   }
 
   for (const number of record.removedNumbers ?? []) {
@@ -242,17 +252,34 @@ function normalizeFields(
 
 function normalizeField(
   field: SkirField,
+  recordType: "struct" | "enum",
   context: NormalizationContext,
-): NormalizedField | { readonly kind: "removed"; readonly number: number } {
+): NormalizedField | NormalizedEnumConstant | { readonly kind: "removed"; readonly number: number } {
   if (field.kind === "removed") {
     return field;
   }
 
+  const name = tokenText(field.name);
+
+  if (field.type === undefined) {
+    if (recordType === "enum") {
+      return {
+        kind: "field",
+        name,
+        number: field.number,
+        hasPayload: false,
+      };
+    }
+
+    throw new Error(`Struct field "${name}" in ${context.description} is missing its resolved type.`);
+  }
+
   return {
     kind: "field",
-    name: tokenText(field.name),
+    name,
     number: field.number,
-    type: field.type === undefined ? { kind: "mixed" } : normalizeType(field.type, context),
+    hasPayload: true,
+    type: normalizeType(field.type, context),
   };
 }
 

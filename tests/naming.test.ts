@@ -25,6 +25,12 @@ describe("PHP name conversion", () => {
     expect(toPropertyName("get_user-profile status")).toBe("getUserProfileStatus");
     expect(toPhpNamespaceSegment("admin.api-v2")).toBe("AdminApiV2");
   });
+
+  it("prefixes numeric-leading schema names with an underscore", () => {
+    expect(toClassName("123-status")).toBe("_123Status");
+    expect(toPropertyName("123-status")).toBe("_123Status");
+    expect(toPhpNamespaceSegment("2026-api")).toBe("_2026Api");
+  });
 });
 
 describe("buildPhpNameRegistry", () => {
@@ -74,5 +80,16 @@ describe("buildPhpNameRegistry", () => {
     expect(() => buildPhpNameRegistry("App\\Skir", schema, () => "User")).toThrow(
       /PHP class collision after deterministic prefixing/i,
     );
+  });
+
+  it("accepts legal underscore names and rejects invalid callback class names", () => {
+    const schema = normalizeSchema({
+      modules: [{ path: "admin/users.skir", records: [record("user", "User")] }],
+    });
+
+    expect(buildPhpNameRegistry("App\\Skir", schema, () => "_User123")
+      .namesByRecordKey.get("user")).toBe("_User123");
+    expect(() => buildPhpNameRegistry("App\\Skir", schema, () => "123-User"))
+      .toThrow(/invalid PHP class name "123-User".*admin\/users\.skir::User/i);
   });
 });

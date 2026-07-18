@@ -11,6 +11,8 @@ interface NameCandidate {
   readonly baseClassName: string;
 }
 
+const PHP_CLASS_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 export function buildPhpNameRegistry(
   rootNamespace: string,
   schema: NormalizedSchema,
@@ -28,10 +30,7 @@ export function buildPhpNameRegistry(
     }
 
     const baseClassName = recordClassName(record);
-
-    if (baseClassName === "") {
-      throw new Error(`The PHP class name for record ${record.identity} is empty.`);
-    }
+    assertValidPhpClassName(baseClassName, `for record ${record.identity}`);
 
     const namespace = [rootNamespace, ...module.namespaceSegments]
       .filter((segment) => segment !== "")
@@ -89,6 +88,11 @@ export function buildPhpNameRegistry(
       throw new Error(`No PHP class name was resolved for record ${candidate.record.identity}.`);
     }
 
+    assertValidPhpClassName(
+      className,
+      `after collision prefixing for record ${candidate.record.identity}`,
+    );
+
     const emittedKey = `${candidate.namespace}\\${className}`.toLowerCase();
     const existing = emittedNames.get(emittedKey);
 
@@ -113,11 +117,13 @@ export function buildPhpNameRegistry(
 }
 
 export function toClassName(name: string): string {
-  return name
+  const className = name
     .split(/[_\-\s]+/)
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join("");
+
+  return /^[0-9]/.test(className) ? `_${className}` : className;
 }
 
 export function toPropertyName(name: string): string {
@@ -134,4 +140,12 @@ function moduleClassPrefix(modulePath: string): string {
   const moduleFileName = modulePath.split("/").at(-1) ?? modulePath;
 
   return toClassName(moduleFileName.replace(/\.skir$/, ""));
+}
+
+function assertValidPhpClassName(className: string, context: string): void {
+  if (!PHP_CLASS_IDENTIFIER.test(className)) {
+    throw new Error(
+      `Invalid PHP class name "${className}" ${context}; expected an ASCII identifier starting with a letter or underscore and containing only letters, numbers, and underscores.`,
+    );
+  }
 }

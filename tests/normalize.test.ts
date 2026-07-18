@@ -1,4 +1,4 @@
-import type { Token } from "skir-internal";
+import type { Field, Record, RecordLocation, Token } from "skir-internal";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -156,6 +156,7 @@ describe("normalizeSchema", () => {
         kind: "field",
         name: "organization",
         number: 1,
+        hasPayload: true,
         type: {
           kind: "record",
           recordIdentity: "common/organization.skir::Organization",
@@ -167,6 +168,7 @@ describe("normalizeSchema", () => {
         kind: "field",
         name: "tags",
         number: 3,
+        hasPayload: true,
         type: {
           kind: "optional",
           inner: { kind: "array", item: { kind: "string" } },
@@ -201,6 +203,116 @@ describe("normalizeSchema", () => {
       namespaceSegments: [],
       moduleIdentity: "_Root",
     });
+  });
+
+  it("distinguishes producer enum constants from payload variants", () => {
+    const emptyDoc = { text: "", pieces: [] };
+    const unknownVariant: Field = {
+      kind: "field",
+      name: token("Unknown", "status.skir"),
+      number: 0,
+      doc: emptyDoc,
+      unresolvedType: undefined,
+      inlineRecord: undefined,
+      type: undefined,
+      isRecursive: false,
+    };
+    const expiresAtVariant: Field = {
+      kind: "field",
+      name: token("ExpiresAt", "status.skir"),
+      number: 1,
+      doc: emptyDoc,
+      unresolvedType: { kind: "primitive", primitive: "timestamp" },
+      inlineRecord: undefined,
+      type: { kind: "primitive", primitive: "timestamp" },
+      isRecursive: false,
+    };
+    const statusRecord: Record = {
+      kind: "record",
+      key: "status-key",
+      name: token("Status", "status.skir"),
+      recordType: "enum",
+      doc: emptyDoc,
+      nameToDeclaration: { Unknown: unknownVariant, ExpiresAt: expiresAtVariant },
+      declarations: [unknownVariant, expiresAtVariant],
+      fields: [unknownVariant, expiresAtVariant],
+      nestedRecords: [],
+      removedNumbers: [],
+      recordNumber: null,
+      numSlots: 0,
+      numSlotsInclRemovedNumbers: 0,
+    };
+    const statusLocation: RecordLocation = {
+      kind: "record-location",
+      record: statusRecord,
+      recordAncestors: [statusRecord],
+      modulePath: "status.skir",
+    };
+
+    const schema = normalizeSchema({
+      modules: [{ path: "status.skir", records: [statusLocation] }],
+      recordMap: new Map([["status-key", statusLocation]]),
+    });
+
+    expect(schema.modules[0]?.records[0]?.fields).toEqual([
+      {
+        kind: "field",
+        name: "Unknown",
+        number: 0,
+        hasPayload: false,
+      },
+      {
+        kind: "field",
+        name: "ExpiresAt",
+        number: 1,
+        hasPayload: true,
+        type: { kind: "timestamp" },
+      },
+    ]);
+  });
+
+  it("keeps struct fields typed and rejects a missing resolved type", () => {
+    const validSchema = normalizeSchema({
+      modules: [{
+        path: "flags.skir",
+        records: [{
+          kind: "record",
+          key: "flags-key",
+          name: token("Flags", "flags.skir"),
+          recordType: "struct",
+          fields: [{
+            kind: "field",
+            name: token("active", "flags.skir"),
+            number: 0,
+            type: { kind: "primitive", primitive: "bool" },
+          }],
+        }],
+      }],
+    });
+
+    expect(validSchema.modules[0]?.records[0]?.fields[0]).toEqual({
+      kind: "field",
+      name: "active",
+      number: 0,
+      hasPayload: true,
+      type: { kind: "bool" },
+    });
+    expect(() => normalizeSchema({
+      modules: [{
+        path: "broken.skir",
+        records: [{
+          kind: "record",
+          key: "broken-key",
+          name: token("Broken", "broken.skir"),
+          recordType: "struct",
+          fields: [{
+            kind: "field",
+            name: token("missing", "broken.skir"),
+            number: 0,
+          }],
+        }],
+      }],
+    })).toThrow(/struct field "missing".*missing.*type/i);
   });
 
   it("rejects case-insensitive module namespace collisions", () => {

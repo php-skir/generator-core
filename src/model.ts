@@ -98,7 +98,15 @@ export interface NormalizedField {
   readonly kind: "field";
   readonly name: string;
   readonly number: number;
+  readonly hasPayload: true;
   readonly type: NormalizedType;
+}
+
+export interface NormalizedEnumConstant {
+  readonly kind: "field";
+  readonly name: string;
+  readonly number: number;
+  readonly hasPayload: false;
 }
 
 export interface NormalizedRecord {
@@ -108,6 +116,7 @@ export interface NormalizedRecord {
   readonly recordType: "struct" | "enum";
   readonly fields: readonly (
     | NormalizedField
+    | NormalizedEnumConstant
     | { readonly kind: "removed"; readonly number: number }
   )[];
   readonly key?: string;
