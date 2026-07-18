@@ -392,6 +392,127 @@ describe("generatePhp", () => {
     );
   });
 
+  it("aliases cross-module DTOs that collide with generated RPC sibling classes", () => {
+    class RpcSiblingCollisionAdapter extends RecordingAdapter {
+      public override recordClassName(record: NormalizedRecord): string {
+        this.calls.push(`class:${record.identity}`);
+
+        return record.qualifiedName;
+      }
+
+      public override toSkirExpression(
+        type: NormalizedType,
+        expression: string,
+        context: RenderContext,
+      ): string {
+        this.calls.push(`to:${type.kind}`);
+
+        return type.kind === "record"
+          ? `${importedRecordClass(type, context)}::toSkir(${expression})`
+          : expression;
+      }
+
+      public override fromSkirExpression(
+        type: NormalizedType,
+        expression: string,
+        context: RenderContext,
+      ): string {
+        this.calls.push(`from:${type.kind}`);
+
+        return type.kind === "record"
+          ? `${importedRecordClass(type, context)}::fromSkir(${expression})`
+          : expression;
+      }
+
+      public override clientResponseExpression(
+        type: NormalizedType,
+        expression: string,
+        context: RenderContext,
+      ): string {
+        this.calls.push(`client:${type.kind}`);
+
+        return type.kind === "record"
+          ? `${importedRecordClass(type, context)}::fromClient(${expression})`
+          : expression;
+      }
+    }
+
+    const skirMethodsReference = {
+      kind: "record",
+      key: "skir-methods-key",
+      recordType: "struct" as const,
+    };
+    const skirProceduresReference = {
+      kind: "record",
+      key: "skir-procedures-key",
+      recordType: "struct" as const,
+    };
+    const files = generatePhp({
+      namespace: "Neutral",
+      modules: [{
+        path: "models/dtos.skir",
+        records: [{
+          kind: "record",
+          key: "skir-methods-key",
+          name: "SkirMethods",
+          recordType: "struct",
+          fields: [],
+        }, {
+          kind: "record",
+          key: "skir-procedures-key",
+          name: "SkirProcedures",
+          recordType: "struct",
+          fields: [],
+        }],
+      }, {
+        path: "rpc/api.skir",
+        methods: [{
+          kind: "method",
+          name: "Collide",
+          number: 1,
+          requestType: skirMethodsReference,
+          responseType: skirProceduresReference,
+        }],
+      }],
+      adapter: new RpcSiblingCollisionAdapter(),
+    });
+    const methodsFile = files.find((file) => file.path === "Rpc/SkirMethods.php");
+    const methodEnumFile = files.find((file) => file.path === "Rpc/RpcSkirMethod.php");
+    const clientFile = files.find((file) => file.path === "Rpc/SkirRpcClient.php");
+    const proceduresFile = files.find((file) => file.path === "Rpc/SkirProcedures.php");
+    const abstractFile = files.find((file) => file.path === "Rpc/AbstractSkirProcedures.php");
+    const providerFile = files.find((file) => file.path === "Rpc/SkirProcedureProvider.php");
+
+    expect(methodsFile?.code).toContain(
+      "use Neutral\\Models\\SkirMethods as ModelsSkirMethods;",
+    );
+    expect(methodsFile?.code).toContain("requestType: ModelsSkirMethods::skirType(),");
+    expect(methodEnumFile?.code).not.toContain("use Neutral\\Models");
+    expect(methodEnumFile?.code).toContain("SkirMethods::collide()");
+    expect(clientFile?.code).toContain(
+      "use Neutral\\Models\\SkirMethods as ModelsSkirMethods;",
+    );
+    expect(clientFile?.code).toContain("$this->client->invoke(SkirMethods::collide(),");
+    expect(proceduresFile?.code).toContain(
+      "use Neutral\\Models\\SkirProcedures as ModelsSkirProcedures;",
+    );
+    expect(proceduresFile?.code).toContain(
+      "public function collide(SkirMethods $request, SkirContext $context): ModelsSkirProcedures;",
+    );
+    expect(abstractFile?.code).toContain(
+      "use Neutral\\Models\\SkirMethods as ModelsSkirMethods;",
+    );
+    expect(abstractFile?.code).toContain("SkirMethods::collide()");
+    expect(providerFile?.code).toContain(
+      "use Neutral\\Models\\SkirMethods as ModelsSkirMethods;",
+    );
+    expect(providerFile?.code).toContain(
+      "use Neutral\\Models\\SkirProcedures as ModelsSkirProcedures;",
+    );
+    expect(providerFile?.code).toContain("private SkirProcedures $procedures,");
+    expect(providerFile?.code).toContain("SkirMethods::collide()");
+  });
+
   it("rejects duplicate generated output paths with the colliding path", () => {
     class DuplicatePathAdapter extends RecordingAdapter {
       public override renderStruct({ record }: StructRenderRequest): GeneratedFile {

@@ -55,7 +55,7 @@ function renderMethodsFile(input: RenderRpcInput): GeneratedFile {
     "Skir\\Runtime\\MethodDescriptor",
     ...(requiresRuntimeType ? ["Skir\\Runtime\\Type"] : []),
   ];
-  const context = createFileContext(input, "SkirMethods", runtimeImports);
+  const context = createFileContext(input, ["SkirMethods"], runtimeImports);
   const methodDescriptor = importClass(context.imports, "Skir\\Runtime\\MethodDescriptor");
   const typeClass = requiresRuntimeType
     ? importClass(context.imports, "Skir\\Runtime\\Type")
@@ -83,7 +83,7 @@ function renderMethodsFile(input: RenderRpcInput): GeneratedFile {
 
 function renderMethodEnumFile(input: RenderRpcInput): GeneratedFile {
   const className = methodEnumClassName(input.module);
-  const context = createFileContext(input, className, [
+  const context = createFileContext(input, [className, "SkirMethods"], [
     "Skir\\Runtime\\MethodDescriptor",
     "Skir\\Server\\Contracts\\SkirMethodReference",
   ]);
@@ -153,7 +153,7 @@ function renderMethodDescriptor(
 }
 
 function renderClientFile(input: RenderRpcInput): GeneratedFile {
-  const context = createFileContext(input, "SkirRpcClient", [
+  const context = createFileContext(input, ["SkirRpcClient", "SkirMethods"], [
     "Skir\\Client\\SkirClient",
   ]);
   const skirClient = importClass(context.imports, "Skir\\Client\\SkirClient");
@@ -196,7 +196,7 @@ function renderClientMethod(
 }
 
 function renderProceduresFile(input: RenderRpcInput): GeneratedFile {
-  const context = createFileContext(input, "SkirProcedures", [
+  const context = createFileContext(input, ["SkirProcedures"], [
     "Skir\\Server\\SkirContext",
   ]);
   const skirContext = importClass(context.imports, "Skir\\Server\\SkirContext");
@@ -223,7 +223,7 @@ function renderProcedureMethod(
 }
 
 function renderAbstractProceduresFile(input: RenderRpcInput): GeneratedFile {
-  const context = createFileContext(input, "AbstractSkirProcedures", [
+  const context = createFileContext(input, ["AbstractSkirProcedures", "SkirMethods"], [
     "Skir\\Server\\ProcedureProvider",
     "Skir\\Server\\SkirContext",
     "Skir\\Server\\SkirServer",
@@ -275,11 +275,15 @@ function renderAbstractProcedureMethod(
 }
 
 function renderProcedureProviderFile(input: RenderRpcInput): GeneratedFile {
-  const context = createFileContext(input, "SkirProcedureProvider", [
-    "Skir\\Server\\ProcedureProvider",
-    "Skir\\Server\\SkirContext",
-    "Skir\\Server\\SkirServer",
-  ]);
+  const context = createFileContext(
+    input,
+    ["SkirProcedureProvider", "SkirProcedures", "SkirMethods"],
+    [
+      "Skir\\Server\\ProcedureProvider",
+      "Skir\\Server\\SkirContext",
+      "Skir\\Server\\SkirServer",
+    ],
+  );
   const procedureProvider = importClass(context.imports, "Skir\\Server\\ProcedureProvider");
   const skirContext = importClass(context.imports, "Skir\\Server\\SkirContext");
   const skirServer = importClass(context.imports, "Skir\\Server\\SkirServer");
@@ -363,7 +367,7 @@ function descriptorRequiresRuntimeType(type: NormalizedType): boolean {
 
 function createFileContext(
   input: RenderRpcInput,
-  className: string,
+  reservedNames: readonly string[],
   runtimeImports: readonly string[],
 ): RenderContext {
   const namespace = [input.rootNamespace, ...input.module.namespaceSegments]
@@ -376,7 +380,7 @@ function createFileContext(
     pathPrefix: input.module.namespaceSegments.join("/"),
     names: input.names,
     imports: createImportRegistry(
-      [className],
+      reservedNames,
       [...(input.plannedImports ?? []), ...runtimeImports],
     ),
   };
