@@ -20,10 +20,16 @@ export function renderEnum(
   }
 
   const className = classNameForRecord(record, context);
-  const denseJson = importClass(context.imports, "Skir\\Runtime\\DenseJson");
-  const enumValue = importClass(context.imports, "Skir\\Runtime\\EnumValue");
-  const typeClass = importClass(context.imports, "Skir\\Runtime\\Type");
-  const variant = importClass(context.imports, "Skir\\Runtime\\Variant");
+  const runtimeImports = [
+    "Skir\\Runtime\\DenseJson",
+    "Skir\\Runtime\\EnumValue",
+    "Skir\\Runtime\\Type",
+    "Skir\\Runtime\\Variant",
+  ] as const;
+  const denseJson = importClass(context.imports, runtimeImports[0]);
+  const enumValue = importClass(context.imports, runtimeImports[1]);
+  const typeClass = importClass(context.imports, runtimeImports[2]);
+  const variant = importClass(context.imports, runtimeImports[3]);
   const constructors = renderEnumConstructors(record, context, adapter, enumValue);
   const skirType = renderEnumSkirType(record, context, adapter, typeClass, variant);
   const body = [
@@ -55,7 +61,7 @@ export function renderEnum(
     path: outputPath(context, `${className}.php`),
     code: renderPhpFile({
       namespace: context.namespace,
-      imports: renderUseStatements(context.imports),
+      imports: renderUseStatements(context.imports, runtimeImports),
       body,
     }),
   };

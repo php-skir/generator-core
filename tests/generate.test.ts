@@ -347,6 +347,183 @@ describe("generatePhp", () => {
     });
   });
 
+  it("renders enum runtime imports before sorted cross-module payload imports", () => {
+    const addressReference = {
+      kind: "record",
+      key: "address-key",
+      recordType: "struct" as const,
+    };
+    const accountReference = {
+      kind: "record",
+      key: "account-key",
+      recordType: "struct" as const,
+    };
+    const files = generatePhp({
+      namespace: "Neutral",
+      modules: [{
+        path: "models/payloads.skir",
+        records: [{
+          kind: "record",
+          key: "address-key",
+          name: "Address",
+          recordType: "struct",
+          fields: [],
+        }, {
+          kind: "record",
+          key: "account-key",
+          name: "Account",
+          recordType: "struct",
+          fields: [],
+        }],
+      }, {
+        path: "events/status.skir",
+        records: [{
+          kind: "record",
+          key: "status-key",
+          name: "Status",
+          recordType: "enum",
+          fields: [{
+            kind: "field",
+            name: "address_changed",
+            number: 1,
+            type: addressReference,
+          }, {
+            kind: "field",
+            name: "account_changed",
+            number: 2,
+            type: accountReference,
+          }],
+        }],
+      }],
+      adapter: new RecordingAdapter(),
+    });
+    const enumFile = files.find((file) => file.path === "Events/StatusObject.php");
+
+    expect(useStatements(enumFile?.code)).toEqual([
+      "use Skir\\Runtime\\DenseJson;",
+      "use Skir\\Runtime\\EnumValue;",
+      "use Skir\\Runtime\\Type;",
+      "use Skir\\Runtime\\Variant;",
+      "use Neutral\\Models\\AccountObject;",
+      "use Neutral\\Models\\AddressObject;",
+    ]);
+  });
+
+  it("renders each RPC file's runtime imports before sorted cross-module record imports", () => {
+    class ImportingAdapter extends RecordingAdapter {
+      public override toSkirExpression(
+        type: NormalizedType,
+        expression: string,
+        context: RenderContext,
+      ): string {
+        this.calls.push(`to:${type.kind}`);
+
+        return type.kind === "record"
+          ? `${importedRecordClass(type, context)}::toSkir(${expression})`
+          : expression;
+      }
+
+      public override fromSkirExpression(
+        type: NormalizedType,
+        expression: string,
+        context: RenderContext,
+      ): string {
+        this.calls.push(`from:${type.kind}`);
+
+        return type.kind === "record"
+          ? `${importedRecordClass(type, context)}::fromSkir(${expression})`
+          : expression;
+      }
+    }
+
+    const zedReference = {
+      kind: "record",
+      key: "zed-key",
+      recordType: "struct" as const,
+    };
+    const alphaReference = {
+      kind: "record",
+      key: "alpha-key",
+      recordType: "struct" as const,
+    };
+    const files = generatePhp({
+      namespace: "Neutral",
+      modules: [{
+        path: "models/payloads.skir",
+        records: [{
+          kind: "record",
+          key: "zed-key",
+          name: "Zed",
+          recordType: "struct",
+          fields: [],
+        }, {
+          kind: "record",
+          key: "alpha-key",
+          name: "Alpha",
+          recordType: "struct",
+          fields: [],
+        }],
+      }, {
+        path: "rpc/api.skir",
+        methods: [{
+          kind: "method",
+          name: "Exchange",
+          number: 1,
+          requestType: zedReference,
+          responseType: alphaReference,
+        }, {
+          kind: "method",
+          name: "Lookup",
+          number: 2,
+          requestType: "string",
+          responseType: alphaReference,
+        }],
+      }],
+      adapter: new ImportingAdapter(),
+    });
+
+    expect(useStatements(files.find((file) => file.path === "Rpc/SkirMethods.php")?.code))
+      .toEqual([
+        "use Skir\\Runtime\\MethodDescriptor;",
+        "use Skir\\Runtime\\Type;",
+        "use Neutral\\Models\\AlphaObject;",
+        "use Neutral\\Models\\ZedObject;",
+      ]);
+    expect(useStatements(files.find((file) => file.path === "Rpc/RpcSkirMethod.php")?.code))
+      .toEqual([
+        "use Skir\\Runtime\\MethodDescriptor;",
+        "use Skir\\Server\\Contracts\\SkirMethodReference;",
+      ]);
+    expect(useStatements(files.find((file) => file.path === "Rpc/SkirRpcClient.php")?.code))
+      .toEqual([
+        "use Skir\\Client\\SkirClient;",
+        "use Neutral\\Models\\AlphaObject;",
+        "use Neutral\\Models\\ZedObject;",
+      ]);
+    expect(useStatements(files.find((file) => file.path === "Rpc/SkirProcedures.php")?.code))
+      .toEqual([
+        "use Skir\\Server\\SkirContext;",
+        "use Neutral\\Models\\AlphaObject;",
+        "use Neutral\\Models\\ZedObject;",
+      ]);
+    expect(useStatements(files.find((file) => file.path === "Rpc/AbstractSkirProcedures.php")?.code))
+      .toEqual([
+        "use Skir\\Server\\ProcedureProvider;",
+        "use Skir\\Server\\SkirContext;",
+        "use Skir\\Server\\SkirServer;",
+        "use Neutral\\Models\\AlphaObject;",
+        "use Neutral\\Models\\ZedObject;",
+      ]);
+    expect(useStatements(files.find((file) => file.path === "Rpc/SkirProcedureProvider.php")?.code))
+      .toEqual([
+        "use Skir\\Server\\ProcedureProvider;",
+        "use Skir\\Server\\SkirContext;",
+        "use Skir\\Server\\SkirServer;",
+        "use Neutral\\Models\\AlphaObject;",
+        "use Neutral\\Models\\ZedObject;",
+      ]);
+  });
+
   it("returns only a terminal manifest for an empty schema", () => {
     const files = generatePhp({
       namespace: "Neutral",
@@ -433,7 +610,10 @@ describe("generatePhp", () => {
     });
     const methodsFile = files.find((file) => file.path === "Rpc/SkirMethods.php");
 
-    expect(methodsFile?.code).toContain("use Skir\\Runtime\\Type as RuntimeType;");
+    expect(useStatements(methodsFile?.code)).toEqual([
+      "use Skir\\Runtime\\MethodDescriptor;",
+      "use Skir\\Runtime\\Type as RuntimeType;",
+    ]);
     expect(methodsFile?.code).toContain("requestType: RuntimeType::string(),");
     expect(methodsFile?.code).toContain(
       "responseType: RuntimeType::optional(RuntimeType::array(RuntimeType::int32())),",
@@ -610,4 +790,8 @@ function importedRecordClass(type: Extract<NormalizedType, { readonly kind: "rec
 
 function pathFor(context: RenderContext, fileName: string): string {
   return context.pathPrefix === "" ? fileName : `${context.pathPrefix}/${fileName}`;
+}
+
+function useStatements(code: string | undefined): readonly string[] {
+  return code?.split("\n").filter((line) => line.startsWith("use ")) ?? [];
 }

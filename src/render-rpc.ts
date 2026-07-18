@@ -23,6 +23,10 @@ export interface RenderRpcInput {
   readonly plannedImports?: readonly string[];
 }
 
+interface RpcFileContext extends RenderContext {
+  readonly runtimeImports: readonly string[];
+}
+
 export function renderRpcFiles(input: RenderRpcInput): GeneratedFile[] {
   if (input.methods.length === 0) {
     return [];
@@ -369,7 +373,7 @@ function createFileContext(
   input: RenderRpcInput,
   reservedNames: readonly string[],
   runtimeImports: readonly string[],
-): RenderContext {
+): RpcFileContext {
   const namespace = [input.rootNamespace, ...input.module.namespaceSegments]
     .filter((segment) => segment !== "")
     .join("\\");
@@ -379,6 +383,7 @@ function createFileContext(
     namespace,
     pathPrefix: input.module.namespaceSegments.join("/"),
     names: input.names,
+    runtimeImports: [...runtimeImports],
     imports: createImportRegistry(
       reservedNames,
       [...(input.plannedImports ?? []), ...runtimeImports],
@@ -387,7 +392,7 @@ function createFileContext(
 }
 
 function renderGeneratedPhpFile(
-  context: RenderContext,
+  context: RpcFileContext,
   fileName: string,
   body: string,
 ): GeneratedFile {
@@ -395,7 +400,7 @@ function renderGeneratedPhpFile(
     path: context.pathPrefix === "" ? fileName : `${context.pathPrefix}/${fileName}`,
     code: renderPhpFile({
       namespace: context.namespace,
-      imports: renderUseStatements(context.imports),
+      imports: renderUseStatements(context.imports, context.runtimeImports),
       body,
     }),
   };

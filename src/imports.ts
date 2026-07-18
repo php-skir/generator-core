@@ -270,18 +270,33 @@ export function importClassAs(
   return localName;
 }
 
-export function renderUseStatements(registry: ImportRegistry): readonly string[] {
+export function renderUseStatements(
+  registry: ImportRegistry,
+  preferredImports: readonly string[] = [],
+): readonly string[] {
   const state = registryState(registry);
-
-  return [...state.imports.entries()]
-    .map(([alias, fullyQualifiedClassName]) => {
+  const statementsByClassName = new Map(
+    [...state.imports.entries()].map(([alias, fullyQualifiedClassName]) => {
       const shortName = fullyQualifiedClassName.split("\\").at(-1);
-
-      return alias === shortName
+      const statement = alias === shortName
         ? `use ${fullyQualifiedClassName};`
         : `use ${fullyQualifiedClassName} as ${alias};`;
-    })
+
+      return [fullyQualifiedClassName, statement] as const;
+    }),
+  );
+  const preferredClassNames = new Set(
+    preferredImports.map(canonicalFullyQualifiedClassName),
+  );
+  const preferredStatements = [...preferredClassNames]
+    .map((fullyQualifiedClassName) => statementsByClassName.get(fullyQualifiedClassName))
+    .filter((statement): statement is string => statement !== undefined);
+  const remainingStatements = [...statementsByClassName.entries()]
+    .filter(([fullyQualifiedClassName]) => !preferredClassNames.has(fullyQualifiedClassName))
+    .map(([, statement]) => statement)
     .sort();
+
+  return [...preferredStatements, ...remainingStatements];
 }
 
 function normalizeReservedNames(reservedNames: Iterable<string>): ReadonlySet<string> {

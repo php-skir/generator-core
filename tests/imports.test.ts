@@ -191,6 +191,41 @@ describe("PHP imports", () => {
     expect(renderUseStatements(reverse)).toEqual(renderUseStatements(forward));
   });
 
+  it("renders preferred used imports first with their actual aliases", () => {
+    const registry = createImportRegistry(
+      ["Type"],
+      ["Skir\\Runtime\\Type", "App\\Alpha", "Vendor\\Zed"],
+    );
+
+    importClass(registry, "Vendor\\Zed");
+    importClass(registry, "Skir\\Runtime\\Type");
+    importClass(registry, "App\\Alpha");
+
+    expect(renderUseStatements(registry, [
+      "\\Skir\\Runtime\\Type",
+      "Skir\\Runtime\\Unused",
+      "Skir\\Runtime\\Type",
+    ])).toEqual([
+      "use Skir\\Runtime\\Type as RuntimeType;",
+      "use App\\Alpha;",
+      "use Vendor\\Zed;",
+    ]);
+  });
+
+  it("keeps global deterministic sorting when no preferred imports are supplied", () => {
+    const registry = createImportRegistry([]);
+
+    importClass(registry, "Vendor\\Zed");
+    importClass(registry, "Skir\\Runtime\\Type");
+    importClass(registry, "Vendor\\Alpha");
+
+    expect(renderUseStatements(registry)).toEqual([
+      "use Skir\\Runtime\\Type;",
+      "use Vendor\\Alpha;",
+      "use Vendor\\Zed;",
+    ]);
+  });
+
   it("handles PHP names case-insensitively without duplicate local aliases", () => {
     const registry = createImportRegistry(["type"]);
 
