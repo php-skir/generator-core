@@ -5,6 +5,10 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   tests:
@@ -16,13 +20,14 @@ jobs:
       matrix:
         node:
           - "22"
+          - "24"
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -41,3 +46,40 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+  coverage:
+    name: Coverage
+    if: github.ref == 'refs/heads/main'
+    needs: tests
+    runs-on: ubuntu-latest
+    concurrency:
+      group: coverage-badge
+      cancel-in-progress: false
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Measure coverage
+        run: npm run test:coverage
+
+      - name: Generate coverage badge
+        run: |
+          percentage=$(node -p 'JSON.parse(require("node:fs").readFileSync("coverage/coverage-summary.json", "utf8")).total.lines.pct')
+          node .github/scripts/write-coverage-badge.mjs "$percentage" build/coverage.svg
+
+      - name: Publish coverage badge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/scripts/publish-coverage-badge.sh build/coverage.svg

@@ -1,5 +1,11 @@
 # PHP Skir Generator Core
 
+[![Tests](https://github.com/php-skir/generator-core/actions/workflows/tests.yml/badge.svg)](https://github.com/php-skir/generator-core/actions/workflows/tests.yml)
+[![Coverage](https://raw.githubusercontent.com/php-skir/generator-core/badges/coverage.svg)](https://github.com/php-skir/generator-core/actions/workflows/tests.yml)
+[![npm](https://img.shields.io/badge/npm-unreleased-lightgrey?logo=npm)](https://www.npmjs.com/package/@php-skir/generator-core)
+[![Node.js](https://img.shields.io/badge/Node.js-22%20%7C%2024-339933?logo=nodedotjs&logoColor=white)](https://nodejs.org/)
+[![License](https://img.shields.io/github/license/php-skir/generator-core)](LICENSE)
+
 `@php-skir/generator-core` is the shared build-time TypeScript core for PHP Skir code generators. It normalizes Skir producer values, resolves PHP names and imports, renders the common enum and RPC surface, produces the server manifest, and provides Composer configuration helpers.
 
 Applications normally install a target generator such as `skir-php-generator` rather than this package directly. This package is not a replacement for `php-skir/runtime`: the core runs under Node while generating files, whereas generated PHP uses the Composer runtime in the application.
