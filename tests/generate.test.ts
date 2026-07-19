@@ -365,6 +365,10 @@ describe("generatePhp", () => {
 
         return super.phpType(type, context);
       }
+
+      public manifestPhpType(type: NormalizedType): string | null {
+        return type.kind === "array" ? "Vendor\\TargetCollection" : null;
+      }
     }
 
     const nestedOptional = (other: NormalizedType | string): {
@@ -468,7 +472,7 @@ describe("generatePhp", () => {
           phpMethod: "nestedStringAndArray",
           requestType: "?string",
           requestClass: null,
-          responseType: "?array",
+          responseType: "?Vendor\\TargetCollection",
           responseClass: null,
         }, {
           name: "NestedStruct",

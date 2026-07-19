@@ -196,7 +196,8 @@ function manifestPhpType(
     return fullyQualifiedRecordClassName(input.namespace, input.schema, input.names, type);
   }
 
-  return input.adapter.phpType(type, context);
+  return input.adapter.manifestPhpType?.(type, context)
+    ?? input.adapter.phpType(type, context);
 }
 
 function manifestRequestClass(

@@ -34,6 +34,7 @@ export interface PhpTargetAdapter {
     expression: string,
     context: RenderContext,
   ): string;
+  manifestPhpType?(type: NormalizedType, context: RenderContext): string | null;
   manifestObjectClass(type: NormalizedType, context: RenderContext): string | null;
 }
 
