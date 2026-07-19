@@ -342,6 +342,152 @@ describe("normalizeSchema", () => {
     })).toThrow(/record key "missing-key".*could not be resolved/i);
   });
 
+  it("defaults omitted method and primitive types to string", () => {
+    const schema = normalizeSchema({
+      modules: [{
+        path: "health.skir",
+        records: [{
+          kind: "struct",
+          name: "Health",
+          fields: [{
+            kind: "field",
+            name: "message",
+            number: 0,
+            type: { kind: "primitive" },
+          }],
+        }],
+        methods: [{
+          kind: "method",
+          name: "CheckHealth",
+          number: 0,
+        }],
+      }],
+    });
+
+    expect(schema.modules[0]?.records[0]?.fields[0]).toMatchObject({
+      type: { kind: "string" },
+    });
+    expect(schema.modules[0]?.methods[0]).toMatchObject({
+      requestType: { kind: "string" },
+      responseType: { kind: "string" },
+    });
+  });
+
+  it("infers a missing record-map module path from its sole generated record", () => {
+    const user: SkirRecord = {
+      kind: "struct",
+      name: "User",
+      fields: [],
+    };
+    const location: SkirRecordLocation = {
+      kind: "record-location",
+      record: user,
+      recordAncestors: [user],
+    };
+    const schema = normalizeSchema({
+      modules: [{ path: "admin/users.skir", records: [user] }],
+      recordMap: new Map([["user-key", location]]),
+    });
+
+    expect(schema.recordsByKey.get("user-key")?.identity).toBe("admin/users.skir::User");
+  });
+
+  it("rejects an unscoped record-map entry that is not generated", () => {
+    const externalUser: SkirRecord = {
+      kind: "struct",
+      name: "User",
+      fields: [],
+    };
+
+    expect(() => normalizeSchema({
+      modules: [],
+      recordMap: new Map([["user-key", {
+        kind: "record-location",
+        record: externalUser,
+        recordAncestors: [externalUser],
+      }]]),
+    })).toThrow(/record map location.*user-key.*no module path.*exactly one generated record/i);
+  });
+
+  it("prefers an unkeyed record reference from the method's own module", () => {
+    const schema = normalizeSchema({
+      modules: [
+        {
+          path: "common/users.skir",
+          records: [{ kind: "struct", name: "User", fields: [] }],
+        },
+        {
+          path: "admin/users.skir",
+          records: [{ kind: "struct", name: "User", fields: [] }],
+          methods: [{
+            kind: "method",
+            name: "GetUser",
+            number: 0,
+            requestType: { kind: "record", name: "User" },
+          }],
+        },
+      ],
+    });
+
+    expect(schema.modules[1]?.methods[0]?.requestType).toEqual({
+      kind: "record",
+      recordIdentity: "admin/users.skir::User",
+      recordType: "struct",
+    });
+  });
+
+  it("rejects an ambiguous unkeyed record reference within a module", () => {
+    const firstUser: SkirRecord = { kind: "struct", name: "User", fields: [] };
+    const secondUser: SkirRecord = { kind: "struct", name: "User", fields: [] };
+    const firstContainer: SkirRecord = { kind: "struct", name: "First", fields: [] };
+    const secondContainer: SkirRecord = { kind: "struct", name: "Second", fields: [] };
+
+    expect(() => normalizeSchema({
+      modules: [{
+        path: "admin/users.skir",
+        records: [
+          {
+            kind: "record-location",
+            record: firstUser,
+            recordAncestors: [firstContainer, firstUser],
+            modulePath: "admin/users.skir",
+          },
+          {
+            kind: "record-location",
+            record: secondUser,
+            recordAncestors: [secondContainer, secondUser],
+            modulePath: "admin/users.skir",
+          },
+        ],
+        methods: [{
+          kind: "method",
+          name: "GetUser",
+          number: 0,
+          requestType: { kind: "record", name: "User" },
+        }],
+      }],
+    })).toThrow(/record reference "User".*ambiguous.*First\.User.*Second\.User/i);
+  });
+
+  it.each([
+    [{ kind: "array" }, /array type is missing its item type/i],
+    [{ kind: "optional" }, /optional type is missing its inner type/i],
+    [{ kind: "unsupported" }, /unsupported Skir type kind "unsupported"/i],
+    [{ kind: "record" }, /record reference is missing both a key and a name/i],
+  ] as const)("rejects malformed public type input %j", (requestType, expectedError) => {
+    expect(() => normalizeSchema({
+      modules: [{
+        path: "broken.skir",
+        methods: [{
+          kind: "method",
+          name: "Broken",
+          number: 0,
+          requestType,
+        }],
+      }],
+    })).toThrow(expectedError);
+  });
+
   it("indexes external record locations by their authoritative map keys without generating them", () => {
     const addressRecord: SkirRecord = {
       kind: "record",

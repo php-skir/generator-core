@@ -31,7 +31,7 @@
     "prepack": "npm run build",
     "pack:dry-run": "npm pack --dry-run --cache .npm-cache",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage --coverage.reporter=json-summary --coverage.include=src/**/*.ts",
+    "test:coverage": "vitest run --coverage --coverage.reporter=json-summary --coverage.include=src/**/*.ts --coverage.thresholds.lines=80 --coverage.thresholds.branches=75 --coverage.thresholds.functions=75 --coverage.thresholds.statements=80",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
