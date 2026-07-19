@@ -41,7 +41,7 @@ export function renderEnum(
     "",
     indent(skirType),
     "",
-    indent(renderEnumAccessors()),
+    indent(renderEnumAccessors(record, context, adapter)),
     "",
     indent(renderEnumToSkirValue(enumValue)),
     "",
@@ -85,10 +85,16 @@ function renderEnumConstructors(
         ].join("\n");
       }
 
+      const storedValue = adapter.enumPayloadToSkirExpression?.(
+        field.type,
+        "$value",
+        context,
+      ) ?? "$value";
+
       return [
         `public static function ${toPropertyName(field.name)}(${adapter.phpType(field.type, context)} $value): self`,
         "{",
-        `    return new self(${enumValue}::wrapper('${field.name}', $value));`,
+        `    return new self(${enumValue}::wrapper('${field.name}', ${storedValue}));`,
         "}",
       ].join("\n");
     })
@@ -123,7 +129,36 @@ function renderEnumSkirType(
   ].join("\n");
 }
 
-function renderEnumAccessors(): string {
+function renderEnumAccessors(
+  record: NormalizedRecord,
+  context: RenderContext,
+  adapter: PhpTargetAdapter,
+): string {
+  const rawPayload = "$this->value->value";
+  const convertedPayloads = record.fields
+    .filter((field): field is NormalizedField => (
+      field.kind === "field" && field.hasPayload
+    ))
+    .map((field) => ({
+      name: field.name,
+      expression: adapter.enumPayloadFromSkirExpression?.(
+        field.type,
+        rawPayload,
+        context,
+      ) ?? rawPayload,
+    }))
+    .filter(({ expression }) => expression !== rawPayload);
+  const payloadBody = convertedPayloads.length === 0
+    ? [`    return ${rawPayload};`]
+    : [
+      "    return match ($this->value->name) {",
+      ...convertedPayloads.map(({ name, expression }) => (
+        `        '${name}' => ${expression},`
+      )),
+      `        default => ${rawPayload},`,
+      "    };",
+    ];
+
   return [
     "public function name(): string",
     "{",
@@ -132,7 +167,7 @@ function renderEnumAccessors(): string {
     "",
     "public function payload(): mixed",
     "{",
-    "    return $this->value->value;",
+    ...payloadBody,
     "}",
   ].join("\n");
 }

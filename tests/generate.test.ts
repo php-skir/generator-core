@@ -549,6 +549,96 @@ describe("generatePhp", () => {
     ]);
   });
 
+  it("adapts enum wrapper storage and payload exposure through optional target hooks", () => {
+    class EnumPayloadAdapter extends RecordingAdapter {
+      public enumPayloadToSkirExpression(
+        type: NormalizedType,
+        expression: string,
+        _context: RenderContext,
+      ): string {
+        this.calls.push(`enum-to:${type.kind}`);
+
+        return type.kind === "string" ? expression : `enum_to_skir(${expression})`;
+      }
+
+      public enumPayloadFromSkirExpression(
+        type: NormalizedType,
+        expression: string,
+        _context: RenderContext,
+      ): string {
+        this.calls.push(`enum-from:${type.kind}`);
+
+        return type.kind === "string" ? expression : `enum_from_skir(${expression})`;
+      }
+    }
+
+    const adapter = new EnumPayloadAdapter();
+    const files = generatePhp({
+      namespace: "Neutral",
+      modules: [{
+        path: "events/status.skir",
+        records: [{
+          kind: "record",
+          name: "Status",
+          recordType: "enum",
+          fields: [{
+            kind: "field",
+            name: "message",
+            number: 1,
+            type: "string",
+          }, {
+            kind: "field",
+            name: "expires_at",
+            number: 2,
+            type: "timestamp",
+          }],
+        }],
+      }],
+      adapter,
+    });
+    const source = files.find((file) => file.path === "Events/StatusObject.php")?.code ?? "";
+
+    expect(source).toContain("return new self(EnumValue::wrapper('message', $value));");
+    expect(source).toContain("return new self(EnumValue::wrapper('expires_at', enum_to_skir($value)));");
+    expect(source).toContain("return match ($this->value->name) {");
+    expect(source).toContain("'expires_at' => enum_from_skir($this->value->value),");
+    expect(source).toContain("default => $this->value->value,");
+    expect(source).not.toContain("'message' =>");
+    expect(adapter.calls).toContain("enum-to:timestamp");
+    expect(adapter.calls).toContain("enum-from:timestamp");
+  });
+
+  it("keeps enum wrapper output byte-compatible when target hooks are absent", () => {
+    const files = generatePhp({
+      namespace: "Neutral",
+      modules: [{
+        path: "events/status.skir",
+        records: [{
+          kind: "record",
+          name: "Status",
+          recordType: "enum",
+          fields: [{
+            kind: "field",
+            name: "expires_at",
+            number: 2,
+            type: "timestamp",
+          }],
+        }],
+      }],
+      adapter: new RecordingAdapter(),
+    });
+    const source = files.find((file) => file.path === "Events/StatusObject.php")?.code ?? "";
+
+    expect(source).toContain("return new self(EnumValue::wrapper('expires_at', $value));");
+    expect(source).toContain([
+      "public function payload(): mixed",
+      "    {",
+      "        return $this->value->value;",
+      "    }",
+    ].join("\n"));
+    expect(source).not.toContain("return match ($this->value->name)");
+  });
+
   it("renders each RPC file's runtime imports before sorted cross-module record imports", () => {
     class ImportingAdapter extends RecordingAdapter {
       public override toSkirExpression(

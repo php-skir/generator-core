@@ -16,6 +16,16 @@ export interface PhpTargetAdapter {
   phpType(type: NormalizedType, context: RenderContext): string;
   toSkirExpression(type: NormalizedType, expression: string, context: RenderContext): string;
   fromSkirExpression(type: NormalizedType, expression: string, context: RenderContext): string;
+  enumPayloadToSkirExpression?(
+    type: NormalizedType,
+    expression: string,
+    context: RenderContext,
+  ): string;
+  enumPayloadFromSkirExpression?(
+    type: NormalizedType,
+    expression: string,
+    context: RenderContext,
+  ): string;
   clientResponseExpression(
     type: NormalizedType,
     expression: string,
