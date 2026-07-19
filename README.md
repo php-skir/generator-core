@@ -147,14 +147,3 @@ npm test
 - `npm test` runs the Vitest unit and integration suite.
 
 Contributions should keep the core independent of PHP DTO libraries, add focused tests for behavior changes, and verify downstream adapter compatibility when shared rendering or public types change.
-
-## Release order
-
-The core must be available before adapter lockfiles can resolve it:
-
-1. Merge and publish `@php-skir/generator-core` 0.1.0.
-2. Install the published core version in every adapter and commit each updated `package-lock.json`.
-3. Run `npm ci`, tests, typecheck, build, and package dry-run in every adapter.
-4. Merge and release the standard PHP, Laravel Data, and Simple Data Objects adapters.
-
-Publishing is performed by the release workflow on Node 24 with npm trusted publishing and provenance. Configure the GitHub repository and `release.yml` workflow as a trusted publisher in npm; no long-lived npm token is used by the workflow.
