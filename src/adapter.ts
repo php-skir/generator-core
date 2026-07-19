@@ -12,6 +12,7 @@ export interface PhpTargetAdapter {
   prepare?(schema: NormalizedSchema): void;
   recordClassName(record: NormalizedRecord): string;
   structImports?(record: NormalizedRecord): readonly string[];
+  enumImports?(record: NormalizedRecord): readonly string[];
   renderStruct(request: StructRenderRequest): GeneratedFile;
   phpType(type: NormalizedType, context: RenderContext): string;
   toSkirExpression(type: NormalizedType, expression: string, context: RenderContext): string;

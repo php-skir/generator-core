@@ -105,7 +105,7 @@ function renderRecord(
 
   const targetImports = record.recordType === "struct"
     ? input.adapter.structImports?.(record) ?? []
-    : [];
+    : input.adapter.enumImports?.(record) ?? [];
 
   const context = createRenderContext(
     input,

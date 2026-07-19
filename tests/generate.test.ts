@@ -639,6 +639,72 @@ describe("generatePhp", () => {
     expect(source).not.toContain("return match ($this->value->name)");
   });
 
+  it("preplans target enum imports that collide with generated record basenames", () => {
+    const typedDataCollection = "StdOut\\SimpleDataObjects\\TypedDataCollection";
+
+    class EnumImportCollisionAdapter extends RecordingAdapter {
+      public override recordClassName(record: NormalizedRecord): string {
+        return record.qualifiedName;
+      }
+
+      public enumImports(record: NormalizedRecord): readonly string[] {
+        return record.recordType === "enum" ? [typedDataCollection] : [];
+      }
+
+      public enumPayloadFromSkirExpression(
+        type: NormalizedType,
+        expression: string,
+        context: RenderContext,
+      ): string {
+        if (type.kind !== "array") {
+          return expression;
+        }
+
+        return `${importClass(context.imports, typedDataCollection)}::of(${expression})`;
+      }
+    }
+
+    const files = generatePhp({
+      namespace: "Neutral",
+      modules: [{
+        path: "models/events.skir",
+        records: [{
+          kind: "record",
+          key: "collection-key",
+          name: "TypedDataCollection",
+          recordType: "struct",
+          fields: [],
+        }, {
+          kind: "record",
+          name: "CollectionEvent",
+          recordType: "enum",
+          fields: [{
+            kind: "field",
+            name: "collected",
+            number: 1,
+            type: {
+              kind: "array",
+              item: {
+                kind: "record",
+                key: "collection-key",
+                recordType: "struct",
+              },
+            },
+          }],
+        }],
+      }],
+      adapter: new EnumImportCollisionAdapter(),
+    });
+    const source = files.find((file) => file.path === "Models/CollectionEvent.php")?.code ?? "";
+
+    expect(source).toContain(
+      "use StdOut\\SimpleDataObjects\\TypedDataCollection as SimpleDataObjectsTypedDataCollection;",
+    );
+    expect(source).toContain(
+      "'collected' => SimpleDataObjectsTypedDataCollection::of($this->value->value),",
+    );
+  });
+
   it("renders each RPC file's runtime imports before sorted cross-module record imports", () => {
     class ImportingAdapter extends RecordingAdapter {
       public override toSkirExpression(
