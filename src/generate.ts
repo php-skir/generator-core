@@ -78,7 +78,10 @@ export function generateNormalizedPhp(input: GenerateNormalizedPhpInput): Genera
     methods: group.methods,
     names: input.names,
     adapter: input.adapter,
-    plannedImports,
+    plannedImports: [
+      ...plannedImports,
+      ...(input.adapter.rpcImports?.(group.methods) ?? []),
+    ],
   }));
   const manifest = generateServerManifestFile(
     input.adapter.id,

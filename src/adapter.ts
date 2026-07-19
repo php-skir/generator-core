@@ -1,6 +1,7 @@
 import type { ImportRegistry } from "./imports.js";
 import type {
   GeneratedFile,
+  NormalizedMethod,
   NormalizedRecord,
   NormalizedSchema,
   NormalizedType,
@@ -13,6 +14,7 @@ export interface PhpTargetAdapter {
   recordClassName(record: NormalizedRecord): string;
   structImports?(record: NormalizedRecord): readonly string[];
   enumImports?(record: NormalizedRecord): readonly string[];
+  rpcImports?(methods: readonly NormalizedMethod[]): readonly string[];
   renderStruct(request: StructRenderRequest): GeneratedFile;
   phpType(type: NormalizedType, context: RenderContext): string;
   toSkirExpression(type: NormalizedType, expression: string, context: RenderContext): string;

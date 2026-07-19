@@ -1,3 +1,8 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -1085,6 +1090,75 @@ describe("generatePhp", () => {
     );
     expect(providerFile?.code).toContain("private SkirProcedures $procedures,");
     expect(providerFile?.code).toContain("SkirMethods::collide()");
+  });
+
+  it("preplans target RPC imports that collide with generated record basenames", () => {
+    const targetCollection = "Vendor\\TypedDataCollection";
+
+    class RpcTargetImportAdapter extends RecordingAdapter {
+      public override recordClassName(): string {
+        return "TypedDataCollection";
+      }
+
+      public rpcImports(): readonly string[] {
+        return [targetCollection];
+      }
+
+      public override phpType(type: NormalizedType, context: RenderContext): string {
+        if (type.kind === "array") {
+          return importClass(context.imports, targetCollection);
+        }
+
+        return super.phpType(type, context);
+      }
+
+      public override clientResponseExpression(
+        type: NormalizedType,
+        expression: string,
+        context: RenderContext,
+      ): string {
+        if (type.kind === "array") {
+          return `${importClass(context.imports, targetCollection)}::from(${expression})`;
+        }
+
+        return super.clientResponseExpression(type, expression, context);
+      }
+    }
+
+    const files = generatePhp({
+      namespace: "Neutral",
+      modules: [{
+        path: "rpc.skir",
+        records: [{
+          kind: "record",
+          key: "item-key",
+          name: "Item",
+          recordType: "struct",
+          fields: [],
+        }],
+        methods: [{
+          kind: "method",
+          name: "Collect",
+          number: 1,
+          requestType: { kind: "array", item: { kind: "record", key: "item-key" } },
+          responseType: { kind: "array", item: { kind: "record", key: "item-key" } },
+        }],
+      }],
+      adapter: new RpcTargetImportAdapter(),
+    });
+    const client = files.find((file) => file.path === "SkirRpcClient.php")?.code ?? "";
+
+    expect(client).toContain(
+      "use Vendor\\TypedDataCollection as VendorTypedDataCollection;",
+    );
+    expect(client).toContain(
+      "public function collect(VendorTypedDataCollection $request): VendorTypedDataCollection",
+    );
+
+    const lintFile = join(mkdtempSync(join(tmpdir(), "skir-core-rpc-import-")), "SkirRpcClient.php");
+
+    writeFileSync(lintFile, client);
+    expect(() => execFileSync("php", ["-l", lintFile], { stdio: "pipe" })).not.toThrow();
   });
 
   it("rejects duplicate generated output paths with the colliding path", () => {
