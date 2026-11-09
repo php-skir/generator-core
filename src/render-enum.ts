@@ -10,6 +10,13 @@ import type {
 import { toPropertyName } from "./naming.js";
 import { indent, renderPhpFile } from "./php.js";
 
+const BINARY_FORMAT = "Skir\\Runtime\\BinaryFormat";
+const DENSE_JSON = "Skir\\Runtime\\DenseJson";
+const ENUM_VALUE = "Skir\\Runtime\\EnumValue";
+const READABLE_JSON = "Skir\\Runtime\\ReadableJson";
+const TYPE = "Skir\\Runtime\\Type";
+const VARIANT = "Skir\\Runtime\\Variant";
+
 export function renderEnum(
   record: NormalizedRecord,
   context: RenderContext,
@@ -21,15 +28,19 @@ export function renderEnum(
 
   const className = classNameForRecord(record, context);
   const runtimeImports = [
-    "Skir\\Runtime\\DenseJson",
-    "Skir\\Runtime\\EnumValue",
-    "Skir\\Runtime\\Type",
-    "Skir\\Runtime\\Variant",
+    BINARY_FORMAT,
+    DENSE_JSON,
+    ENUM_VALUE,
+    READABLE_JSON,
+    TYPE,
+    VARIANT,
   ] as const;
-  const denseJson = importClass(context.imports, runtimeImports[0]);
-  const enumValue = importClass(context.imports, runtimeImports[1]);
-  const typeClass = importClass(context.imports, runtimeImports[2]);
-  const variant = importClass(context.imports, runtimeImports[3]);
+  const binaryFormat = importClass(context.imports, BINARY_FORMAT);
+  const denseJson = importClass(context.imports, DENSE_JSON);
+  const enumValue = importClass(context.imports, ENUM_VALUE);
+  const readableJson = importClass(context.imports, READABLE_JSON);
+  const typeClass = importClass(context.imports, TYPE);
+  const variant = importClass(context.imports, VARIANT);
   const constructors = renderEnumConstructors(record, context, adapter, enumValue);
   const skirType = renderEnumSkirType(record, context, adapter, typeClass, variant);
   const body = [
@@ -54,6 +65,12 @@ export function renderEnum(
     indent(renderEnumToDenseJson(denseJson)),
     "",
     indent(renderEnumFromDenseJson(className, denseJson)),
+    "",
+    indent(renderEnumToReadableJson(readableJson)),
+    "",
+    indent(renderEnumToBytes(binaryFormat)),
+    "",
+    indent(renderEnumFromBytes(className, binaryFormat)),
     "}",
   ].join("\n");
 
@@ -224,6 +241,33 @@ function renderEnumFromDenseJson(className: string, denseJson: string): string {
     `public static function fromDenseJson(string $json): ${className}`,
     "{",
     `    return new self(${denseJson}::fromJson(self::skirType(), $json));`,
+    "}",
+  ].join("\n");
+}
+
+function renderEnumToReadableJson(readableJson: string): string {
+  return [
+    "public function toReadableJson(): string",
+    "{",
+    `    return ${readableJson}::toJson(self::skirType(), $this->value);`,
+    "}",
+  ].join("\n");
+}
+
+function renderEnumToBytes(binaryFormat: string): string {
+  return [
+    "public function toBytes(): string",
+    "{",
+    `    return ${binaryFormat}::encode(self::skirType(), $this->value);`,
+    "}",
+  ].join("\n");
+}
+
+function renderEnumFromBytes(className: string, binaryFormat: string): string {
+  return [
+    `public static function fromBytes(string $bytes): ${className}`,
+    "{",
+    `    return new self(${binaryFormat}::decode(self::skirType(), $bytes));`,
     "}",
   ].join("\n");
 }

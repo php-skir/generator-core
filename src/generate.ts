@@ -116,9 +116,11 @@ function renderRecord(
     [className],
     [
       ...plannedImports,
+      "Skir\\Runtime\\BinaryFormat",
       "Skir\\Runtime\\DenseJson",
       "Skir\\Runtime\\EnumValue",
       "Skir\\Runtime\\Field",
+      "Skir\\Runtime\\ReadableJson",
       "Skir\\Runtime\\Type",
       "Skir\\Runtime\\Variant",
       ...targetImports,

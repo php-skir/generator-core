@@ -1,6 +1,6 @@
 {
   "name": "@php-skir/generator-core",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Shared generation core for PHP Skir code generators.",
   "type": "module",
   "license": "MIT",

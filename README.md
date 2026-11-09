@@ -102,6 +102,22 @@ The core passes the complete `NormalizedType` at each target-specific conversion
 
 The core uses `manifestObjectClass()` for struct requests and record responses after unwrapping optionals. The manifest remains schema version `SERVER_MANIFEST_VERSION`.
 
+## Shared enum surface
+
+The core renders every Skir enum as a `final readonly` wrapper around `Skir\Runtime\EnumValue`, independent of the adapter. Besides one named constructor per constant or wrapper variant, `name()`, `payload()` and `skirType()`, each enum exposes these serialization methods:
+
+| Method | Purpose |
+| --- | --- |
+| `toSkirValue()` / `fromSkirValue(EnumValue $value)` | Converts to and from the runtime `EnumValue`. |
+| `toDenseValue()` / `fromDenseValue(int\|array $value)` | Converts to and from the decoded dense JSON value. |
+| `toDenseJson()` / `fromDenseJson(string $json)` | Encodes dense JSON and decodes dense or readable JSON. |
+| `toReadableJson()` | Encodes readable JSON. Decode readable JSON with `fromDenseJson()`, which accepts both flavors. |
+| `toBytes()` / `fromBytes(string $bytes)` | Encodes and decodes the Skir binary format. |
+
+Adapters that render structs should expose the same `toReadableJson()`, `toBytes()` and `fromBytes()` names so generated code is consistent across targets. The readable JSON and binary helpers require a `php-skir/runtime` version that provides `Skir\Runtime\ReadableJson` and `Skir\Runtime\BinaryFormat`.
+
+Compatibility delta in 0.2.0: generated enums gained `toReadableJson()`, `toBytes()` and `fromBytes()`, and the core now preplans `Skir\Runtime\BinaryFormat` and `Skir\Runtime\ReadableJson` for every record file. Generated records named `BinaryFormat` or `ReadableJson` therefore keep their basename while the runtime classes are aliased.
+
 ## Optional validation overlays
 
 Validation is an adapter capability, not automatic core behavior. Validation-aware targets can include `ValidationConfig` in their own configuration schema and call `resolveValidationRules(schema, config)` from `prepare()`. The resolver validates exact module, qualified-record, and original Skir field selectors and returns rules grouped by normalized record identity. The target decides how those string rules are rendered and executed.
