@@ -549,13 +549,113 @@ describe("generatePhp", () => {
     const enumFile = files.find((file) => file.path === "Events/StatusObject.php");
 
     expect(useStatements(enumFile?.code)).toEqual([
+      "use Skir\\Runtime\\BinaryFormat;",
       "use Skir\\Runtime\\DenseJson;",
       "use Skir\\Runtime\\EnumValue;",
+      "use Skir\\Runtime\\ReadableJson;",
       "use Skir\\Runtime\\Type;",
       "use Skir\\Runtime\\Variant;",
       "use Neutral\\Models\\AccountObject;",
       "use Neutral\\Models\\AddressObject;",
     ]);
+  });
+
+  it("renders readable JSON and binary helpers after the dense JSON helpers on enums", () => {
+    const files = generatePhp({
+      namespace: "Neutral",
+      modules: [{
+        path: "events/status.skir",
+        records: [{
+          kind: "record",
+          name: "Status",
+          recordType: "enum",
+          fields: [{
+            kind: "field",
+            name: "expires_at",
+            number: 2,
+            type: "timestamp",
+          }],
+        }],
+      }],
+      adapter: new RecordingAdapter(),
+    });
+    const source = files.find((file) => file.path === "Events/StatusObject.php")?.code ?? "";
+
+    expect(source).toContain([
+      "    public static function fromDenseJson(string $json): StatusObject",
+      "    {",
+      "        return new self(DenseJson::fromJson(self::skirType(), $json));",
+      "    }",
+      "",
+      "    public function toReadableJson(): string",
+      "    {",
+      "        return ReadableJson::toJson(self::skirType(), $this->value);",
+      "    }",
+      "",
+      "    public function toBytes(): string",
+      "    {",
+      "        return BinaryFormat::encode(self::skirType(), $this->value);",
+      "    }",
+      "",
+      "    public static function fromBytes(string $bytes): StatusObject",
+      "    {",
+      "        return new self(BinaryFormat::decode(self::skirType(), $bytes));",
+      "    }",
+      "}",
+    ].join("\n"));
+  });
+
+  it("aliases the runtime serializers when generated records reserve their basenames", () => {
+    class SerializerCollisionAdapter extends RecordingAdapter {
+      public override recordClassName(record: NormalizedRecord): string {
+        this.calls.push(`class:${record.identity}`);
+
+        return ["BinaryFormat", "ReadableJson"].includes(record.qualifiedName)
+          ? record.qualifiedName
+          : super.recordClassName(record);
+      }
+    }
+
+    const files = generatePhp({
+      namespace: "Neutral",
+      modules: [{
+        path: "models/serializers.skir",
+        records: [{
+          kind: "record",
+          name: "BinaryFormat",
+          recordType: "struct",
+          fields: [],
+        }, {
+          kind: "record",
+          name: "ReadableJson",
+          recordType: "struct",
+          fields: [],
+        }, {
+          kind: "record",
+          name: "Status",
+          recordType: "enum",
+          fields: [{
+            kind: "field",
+            name: "active",
+            number: 1,
+          }],
+        }],
+      }],
+      adapter: new SerializerCollisionAdapter(),
+    });
+    const enumFile = files.find((file) => file.path === "Models/StatusObject.php");
+
+    expect(useStatements(enumFile?.code)).toEqual([
+      "use Skir\\Runtime\\BinaryFormat as RuntimeBinaryFormat;",
+      "use Skir\\Runtime\\DenseJson;",
+      "use Skir\\Runtime\\EnumValue;",
+      "use Skir\\Runtime\\ReadableJson as RuntimeReadableJson;",
+      "use Skir\\Runtime\\Type;",
+      "use Skir\\Runtime\\Variant;",
+    ]);
+    expect(enumFile?.code).toContain("return RuntimeReadableJson::toJson(self::skirType(), $this->value);");
+    expect(enumFile?.code).toContain("return RuntimeBinaryFormat::encode(self::skirType(), $this->value);");
+    expect(enumFile?.code).toContain("return new self(RuntimeBinaryFormat::decode(self::skirType(), $bytes));");
   });
 
   it("adapts enum wrapper storage and payload exposure through optional target hooks", () => {
