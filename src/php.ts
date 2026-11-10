@@ -35,3 +35,54 @@ export function renderPhpFile(input: PhpFileInput): string {
     "",
   ].join("\n");
 }
+
+/**
+ * Renders a PHP string expression for arbitrary text. Line breaks are emitted
+ * as double-quoted escapes concatenated to single-quoted segments, so the
+ * generated expression always stays on one line.
+ */
+export function phpSingleQuotedLiteral(value: string): string {
+  const expressions: string[] = [];
+  let segment = "";
+
+  for (const character of value) {
+    if (character !== "\n" && character !== "\r") {
+      segment += character;
+      continue;
+    }
+
+    if (segment !== "") {
+      expressions.push(escapedPhpStringSegment(segment));
+      segment = "";
+    }
+
+    expressions.push(character === "\n" ? '"\\n"' : '"\\r"');
+  }
+
+  if (segment !== "" || expressions.length === 0) {
+    expressions.push(escapedPhpStringSegment(segment));
+  }
+
+  return expressions.join(".");
+}
+
+/** Renders `, doc: '...'`, or an empty string when there is no doc comment. */
+export function renderDocArgument(doc: string | undefined): string {
+  return doc === undefined || doc.trim() === ""
+    ? ""
+    : `, doc: ${phpSingleQuotedLiteral(doc)}`;
+}
+
+/**
+ * Renders the trailing `, recordId: '...'` (and `, doc: '...'` when present)
+ * arguments of a runtime `Type::struct()` or `Type::enum()` call.
+ */
+export function renderRecordMetadataArguments(
+  record: { readonly recordId: string; readonly doc?: string },
+): string {
+  return `, recordId: ${phpSingleQuotedLiteral(record.recordId)}${renderDocArgument(record.doc)}`;
+}
+
+function escapedPhpStringSegment(value: string): string {
+  return `'${value.replaceAll("\\", "\\\\").replaceAll("'", "\\'")}'`;
+}

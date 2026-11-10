@@ -12,7 +12,7 @@ import type {
 } from "./model.js";
 import type { PhpNameRegistry } from "./naming.js";
 import { toClassName, toPropertyName } from "./naming.js";
-import { indent, renderPhpFile } from "./php.js";
+import { indent, phpSingleQuotedLiteral, renderPhpFile } from "./php.js";
 
 export interface RenderRpcInput {
   readonly rootNamespace: string;
@@ -151,6 +151,9 @@ function renderMethodDescriptor(
     `        number: ${method.number},`,
     `        requestType: ${runtimeTypeExpression(method.requestType, context, adapter, typeClass)},`,
     `        responseType: ${runtimeTypeExpression(method.responseType, context, adapter, typeClass)},`,
+    ...(method.doc === undefined || method.doc.trim() === ""
+      ? []
+      : [`        doc: ${phpSingleQuotedLiteral(method.doc)},`]),
     "    );",
     "}",
   ].join("\n");

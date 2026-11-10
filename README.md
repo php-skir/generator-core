@@ -80,6 +80,8 @@ Import hooks are planning hooks, not rendered `use` statements. Include every co
 
 `RenderContext` supplies the root namespace, current namespace, output path prefix, resolved record names, and the file's import registry. Helpers such as `renderPhpFile()`, `indent()`, and `PHP_FILE_HEADER` keep generated PHP consistent.
 
+Normalized records carry a `recordId` (`<module path>:<qualified name>`, the upstream Skir type signature), and records, fields, variants, and methods carry their doc comment text in `doc` when they have one. The core passes them to `Type::enum()`, `Variant`, and `MethodDescriptor`; struct renderers should append `renderRecordMetadataArguments(record)` to `Type::struct([...])` and `renderDocArgument(field.doc)` to `Field::value(...)`. `phpSingleQuotedLiteral()` renders arbitrary text as a one-line PHP string expression.
+
 ### PHP types and wire conversion
 
 | Member | Purpose |

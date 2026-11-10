@@ -7,6 +7,7 @@ import type {
   NormalizedRecord,
   NormalizedSchema,
   NormalizedType,
+  SkirDoc,
   SkirField,
   SkirMethod,
   SkirModule,
@@ -36,6 +37,8 @@ interface RecordSource {
   readonly identity: string;
   readonly modulePath: string;
   readonly qualifiedName: string;
+  readonly recordId: string;
+  readonly doc?: string;
   readonly recordType: "struct" | "enum";
   readonly key?: string;
   readonly phpClassName?: string;
@@ -71,6 +74,8 @@ export function normalizeSchema(input: CoreGeneratorInput): NormalizedSchema {
         identity: source.identity,
         modulePath: source.modulePath,
         qualifiedName: source.qualifiedName,
+        recordId: source.recordId,
+        ...docProperty(source.doc),
         recordType: source.recordType,
         fields: [],
         ...(source.key === undefined ? {} : { key: source.key }),
@@ -100,6 +105,8 @@ export function normalizeSchema(input: CoreGeneratorInput): NormalizedSchema {
         identity: source.identity,
         modulePath: source.modulePath,
         qualifiedName: source.qualifiedName,
+        recordId: source.recordId,
+        ...docProperty(source.doc),
         recordType: source.recordType,
         fields: [],
         key: mapKey,
@@ -160,6 +167,8 @@ export function normalizeSchema(input: CoreGeneratorInput): NormalizedSchema {
         identity: source.identity,
         modulePath: source.modulePath,
         qualifiedName: source.qualifiedName,
+        recordId: source.recordId,
+        ...docProperty(source.doc),
         recordType: source.recordType,
         fields: normalizeFields(source.record, source.recordType, context),
         ...(source.key === undefined ? {} : { key: source.key }),
@@ -224,6 +233,8 @@ function recordSource(module: SkirModule, input: SkirRecord | SkirRecordLocation
     modulePath,
     qualifiedName,
     identity: `${modulePath}::${qualifiedName}`,
+    recordId: `${modulePath}:${qualifiedName}`,
+    ...docProperty(docText(record.doc)),
     recordType,
     ...(key === undefined ? {} : { key }),
     ...(record.phpClassName === undefined ? {} : { phpClassName: record.phpClassName }),
@@ -272,6 +283,8 @@ function recordMapSource(
     modulePath,
     qualifiedName,
     identity: `${modulePath}::${qualifiedName}`,
+    recordId: `${modulePath}:${qualifiedName}`,
+    ...docProperty(docText(location.record.doc)),
     recordType,
     ...(location.record.phpClassName === undefined
       ? {}
@@ -409,6 +422,7 @@ function normalizeField(
         name,
         number: field.number,
         hasPayload: false,
+        ...docProperty(docText(field.doc)),
       };
     }
 
@@ -421,6 +435,7 @@ function normalizeField(
     number: field.number,
     hasPayload: true,
     type: normalizeType(field.type, context),
+    ...docProperty(docText(field.doc)),
   };
 }
 
@@ -430,6 +445,7 @@ function normalizeMethod(method: SkirMethod, context: NormalizationContext): Nor
     number: method.number,
     requestType: normalizeType(method.requestType ?? "string", context),
     responseType: normalizeType(method.responseType ?? "string", context),
+    ...docProperty(docText(method.doc)),
   };
 }
 
@@ -582,6 +598,16 @@ function recordNamePartText(part: SkirRecordNamePart): string {
   }
 
   return tokenText(part);
+}
+
+function docText(doc: SkirDoc | undefined): string | undefined {
+  const text = doc?.text;
+
+  return text === undefined || text.trim() === "" ? undefined : text;
+}
+
+function docProperty(doc: string | undefined): { readonly doc?: string } {
+  return doc === undefined ? {} : { doc };
 }
 
 function tokenText(token: string | SkirToken): string {
