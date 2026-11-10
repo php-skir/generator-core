@@ -8,7 +8,12 @@ import type {
   NormalizedType,
 } from "./model.js";
 import { toPropertyName } from "./naming.js";
-import { indent, renderPhpFile } from "./php.js";
+import {
+  indent,
+  renderDocArgument,
+  renderPhpFile,
+  renderRecordMetadataArguments,
+} from "./php.js";
 
 const BINARY_FORMAT = "Skir\\Runtime\\BinaryFormat";
 const DENSE_JSON = "Skir\\Runtime\\DenseJson";
@@ -129,10 +134,10 @@ function renderEnumSkirType(
     .filter((field): field is NormalizedField | NormalizedEnumConstant => field.kind === "field")
     .map((field) => {
       if (!field.hasPayload) {
-        return `    ${variant}::constant('${field.name}', ${field.number}),`;
+        return `    ${variant}::constant('${field.name}', ${field.number}${renderDocArgument(field.doc)}),`;
       }
 
-      return `    ${variant}::wrapper('${field.name}', ${field.number}, ${runtimeTypeExpression(field.type, context, adapter, typeClass)}),`;
+      return `    ${variant}::wrapper('${field.name}', ${field.number}, ${runtimeTypeExpression(field.type, context, adapter, typeClass)}${renderDocArgument(field.doc)}),`;
     })
     .join("\n");
 
@@ -141,7 +146,7 @@ function renderEnumSkirType(
     "{",
     `    return ${typeClass}::enum([`,
     entries,
-    "    ]);",
+    `    ]${renderRecordMetadataArguments(record)});`,
     "}",
   ].join("\n");
 }

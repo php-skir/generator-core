@@ -7,6 +7,10 @@ export interface SkirToken {
   readonly text: string;
 }
 
+export interface SkirDoc {
+  readonly text: string;
+}
+
 export type SkirRecordNamePart =
   | string
   | SkirToken
@@ -31,6 +35,7 @@ export type SkirField =
       readonly name: string | SkirToken;
       readonly number: number;
       readonly type?: SkirType;
+      readonly doc?: SkirDoc;
     }
   | {
       readonly kind: "removed";
@@ -45,6 +50,7 @@ export interface SkirRecord {
   readonly fields?: readonly SkirField[];
   readonly removedNumbers?: readonly number[];
   readonly phpClassName?: string;
+  readonly doc?: SkirDoc;
 }
 
 export interface SkirRecordLocation {
@@ -60,6 +66,7 @@ export interface SkirMethod {
   readonly number: number;
   readonly requestType?: SkirType;
   readonly responseType?: SkirType;
+  readonly doc?: SkirDoc;
 }
 
 export interface SkirModule {
@@ -100,6 +107,8 @@ export interface NormalizedField {
   readonly number: number;
   readonly hasPayload: true;
   readonly type: NormalizedType;
+  /** Doc comment text of the field or wrapper variant, when it has one. */
+  readonly doc?: string;
 }
 
 export interface NormalizedEnumConstant {
@@ -107,12 +116,21 @@ export interface NormalizedEnumConstant {
   readonly name: string;
   readonly number: number;
   readonly hasPayload: false;
+  /** Doc comment text of the constant variant, when it has one. */
+  readonly doc?: string;
 }
 
 export interface NormalizedRecord {
   readonly identity: string;
   readonly modulePath: string;
   readonly qualifiedName: string;
+  /**
+   * Schema-level record id, `<module path>:<qualified name>`, matching the
+   * type signature of upstream Skir type descriptors.
+   */
+  readonly recordId: string;
+  /** Doc comment text of the record, when it has one. */
+  readonly doc?: string;
   readonly recordType: "struct" | "enum";
   readonly phpClassName?: string;
   readonly fields: readonly (
@@ -128,6 +146,8 @@ export interface NormalizedMethod {
   readonly number: number;
   readonly requestType: NormalizedType;
   readonly responseType: NormalizedType;
+  /** Doc comment text of the method, when it has one. */
+  readonly doc?: string;
 }
 
 export interface NormalizedModule {

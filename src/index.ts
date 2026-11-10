@@ -20,7 +20,10 @@ export {
 export {
   indent,
   PHP_FILE_HEADER,
+  phpSingleQuotedLiteral,
+  renderDocArgument,
   renderPhpFile,
+  renderRecordMetadataArguments,
 } from "./php.js";
 export {
   ComposerAutoloadConflictError,
@@ -68,6 +71,7 @@ export type {
   NormalizedRecord,
   NormalizedSchema,
   NormalizedType,
+  SkirDoc,
   SkirField,
   SkirMethod,
   SkirModule,
