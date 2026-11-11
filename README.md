@@ -50,8 +50,18 @@ export function generate(
 1. Normalize modules and external record locations into the PHP-oriented `NormalizedSchema`.
 2. Resolve deterministic record class names with `recordClassName()`.
 3. Call the optional `prepare()` hook once.
-4. Preplan imports and render target structs, shared enum wrappers, and the complete RPC surface.
-5. Produce `skir-server-manifest.json` and reject duplicate output paths.
+4. Preplan imports and render target structs, shared enum wrappers, and the RPC files selected by `emit`.
+5. Produce `skir-server-manifest.json` unless `emit` is `client`, and reject duplicate output paths.
+
+The optional `emit` input selects which RPC side to render. Generators can reuse the exported `Emit` Zod schema (`"both" | "client" | "server"`, default `"both"`) in their own config:
+
+| `emit` | RPC files |
+| --- | --- |
+| `both` (default) | `SkirMethods`, the module method enum, `SkirRpcClient`, `SkirProcedures`, `AbstractSkirProcedures`, `SkirProcedureProvider`, and the manifest. |
+| `client` | `SkirMethods` and `SkirRpcClient`. Nothing references `Skir\Server`. |
+| `server` | Everything except `SkirRpcClient`. Nothing references `Skir\Client`. |
+
+Records are rendered for every value.
 
 `generateNormalizedPhp()` starts at phase four. Callers using it must supply both a normalized schema and a matching `PhpNameRegistry`; it deliberately does not call `prepare()`.
 
