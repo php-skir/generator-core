@@ -8,3 +8,7 @@ export const PhpNamespace = z.string().regex(
 );
 
 export type PhpNamespace = z.infer<typeof PhpNamespace>;
+
+export const Emit = z.enum(["both", "client", "server"]).default("both");
+
+export type Emit = z.infer<typeof Emit>;

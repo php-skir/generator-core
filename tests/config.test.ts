@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_NAMESPACE, PhpNamespace } from "../src/index.js";
+import { DEFAULT_NAMESPACE, Emit, PhpNamespace } from "../src/index.js";
 
 const PHP_NAMESPACE_ERROR = "Namespace must be a canonical PHP namespace using ASCII identifier segments separated by single backslashes.";
 
@@ -36,5 +36,17 @@ describe("PhpNamespace", () => {
     if (!result.success) {
       expect(result.error.issues[0]?.message).toBe(PHP_NAMESPACE_ERROR);
     }
+  });
+});
+
+describe("Emit", () => {
+  it("defaults to both sides and accepts client or server", () => {
+    expect(Emit.parse(undefined)).toBe("both");
+    expect(Emit.parse("client")).toBe("client");
+    expect(Emit.parse("server")).toBe("server");
+  });
+
+  it("rejects unknown values", () => {
+    expect(Emit.safeParse("clients").success).toBe(false);
   });
 });

@@ -942,6 +942,59 @@ describe("generatePhp", () => {
     }]);
   });
 
+  it("emits the shared and client RPC files without server files or the manifest for emit client", () => {
+    const files = generatePhp({
+      namespace: "Neutral",
+      modules: producerModules,
+      adapter: new RecordingAdapter(),
+      emit: "client",
+    });
+
+    expect(files.map((file) => file.path)).toEqual([
+      "Common/AddressObject.php",
+      "Admin/UserObject.php",
+      "Admin/StatusObject.php",
+      "Admin/SkirMethods.php",
+      "Admin/SkirRpcClient.php",
+    ]);
+    expect(files.filter((file) => file.code.includes("Skir\\Server"))).toEqual([]);
+  });
+
+  it("emits the shared and server RPC files and the manifest without the client for emit server", () => {
+    const files = generatePhp({
+      namespace: "Neutral",
+      modules: producerModules,
+      adapter: new RecordingAdapter(),
+      emit: "server",
+    });
+
+    expect(files.map((file) => file.path)).toEqual([
+      "Common/AddressObject.php",
+      "Admin/UserObject.php",
+      "Admin/StatusObject.php",
+      "Admin/SkirMethods.php",
+      "Admin/AdminSkirMethod.php",
+      "Admin/SkirProcedures.php",
+      "Admin/AbstractSkirProcedures.php",
+      "Admin/SkirProcedureProvider.php",
+      "skir-server-manifest.json",
+    ]);
+    expect(files.filter((file) => file.code.includes("Skir\\Client"))).toEqual([]);
+  });
+
+  it("renders byte-identical output for an explicit emit both", () => {
+    expect(generatePhp({
+      namespace: "Neutral",
+      modules: producerModules,
+      adapter: new RecordingAdapter(),
+      emit: "both",
+    })).toEqual(generatePhp({
+      namespace: "Neutral",
+      modules: producerModules,
+      adapter: new RecordingAdapter(),
+    }));
+  });
+
   it("does not import the runtime Type when all descriptors are direct records", () => {
     const recordReference = {
       kind: "record",

@@ -1,4 +1,5 @@
 import type { PhpTargetAdapter, RenderContext } from "./adapter.js";
+import type { Emit } from "./config.js";
 import {
   createImportRegistry,
   importClass,
@@ -21,6 +22,7 @@ export interface RenderRpcInput {
   readonly names: PhpNameRegistry;
   readonly adapter: PhpTargetAdapter;
   readonly plannedImports?: readonly string[];
+  readonly emit?: Emit;
 }
 
 interface RpcFileContext extends RenderContext {
@@ -32,13 +34,23 @@ export function renderRpcFiles(input: RenderRpcInput): GeneratedFile[] {
     return [];
   }
 
+  const emit = input.emit ?? "both";
+  const client = emit !== "server";
+  const server = emit !== "client";
+
+  // SkirMethods only needs php-skir/runtime, so both sides get it. The method enum implements
+  // php-skir/server's SkirMethodReference, so it is server-only.
   return [
     renderMethodsFile(input),
-    renderMethodEnumFile(input),
-    renderClientFile(input),
-    renderProceduresFile(input),
-    renderAbstractProceduresFile(input),
-    renderProcedureProviderFile(input),
+    ...(server ? [renderMethodEnumFile(input)] : []),
+    ...(client ? [renderClientFile(input)] : []),
+    ...(server
+      ? [
+        renderProceduresFile(input),
+        renderAbstractProceduresFile(input),
+        renderProcedureProviderFile(input),
+      ]
+      : []),
   ];
 }
 

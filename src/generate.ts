@@ -1,4 +1,5 @@
 import type { PhpTargetAdapter, RenderContext } from "./adapter.js";
+import type { Emit } from "./config.js";
 import { createImportRegistry } from "./imports.js";
 import type {
   GeneratedFile,
@@ -26,6 +27,8 @@ export interface GeneratePhpInput {
   readonly modules: readonly SkirModule[];
   readonly recordMap?: ReadonlyMap<string, SkirRecordLocation>;
   readonly adapter: PhpTargetAdapter;
+  /** Which RPC files to emit; records and `SkirMethods` are always emitted. Defaults to "both". */
+  readonly emit?: Emit;
 }
 
 export interface GenerateNormalizedPhpInput {
@@ -33,6 +36,7 @@ export interface GenerateNormalizedPhpInput {
   readonly schema: NormalizedSchema;
   readonly names: PhpNameRegistry;
   readonly adapter: PhpTargetAdapter;
+  readonly emit?: Emit;
 }
 
 interface MethodGroup {
@@ -58,6 +62,7 @@ export function generatePhp(input: GeneratePhpInput): GeneratedFile[] {
     schema,
     names,
     adapter: input.adapter,
+    ...(input.emit === undefined ? {} : { emit: input.emit }),
   });
 }
 
@@ -72,7 +77,9 @@ export function generateNormalizedPhp(input: GenerateNormalizedPhpInput): Genera
     ))
   ));
   const methodGroups = collectMethodGroups(input.schema.modules);
+  const emit = input.emit ?? "both";
   const rpcFiles = methodGroups.flatMap((group) => renderRpcFiles({
+    emit,
     rootNamespace: input.namespace,
     module: group.module,
     methods: group.methods,
@@ -83,11 +90,14 @@ export function generateNormalizedPhp(input: GenerateNormalizedPhpInput): Genera
       ...(input.adapter.rpcImports?.(group.methods) ?? []),
     ],
   }));
-  const manifest = generateServerManifestFile(
-    input.adapter.id,
-    methodGroups.map((group) => renderManifestModule(input, group)),
-  );
-  const files = [...recordFiles, ...rpcFiles, manifest];
+  // The manifest is read by php-skir/server's scaffolding, so client-only output leaves it out.
+  const manifest = emit === "client"
+    ? []
+    : [generateServerManifestFile(
+      input.adapter.id,
+      methodGroups.map((group) => renderManifestModule(input, group)),
+    )];
+  const files = [...recordFiles, ...rpcFiles, ...manifest];
 
   assertDistinctOutputPaths(files);
 

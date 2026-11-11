@@ -31,7 +31,7 @@ export {
   MalformedComposerPsr4PrefixError,
 } from "./composer-autoload.js";
 export { configureComposer } from "./configure-composer.js";
-export { DEFAULT_NAMESPACE, PhpNamespace } from "./config.js";
+export { DEFAULT_NAMESPACE, Emit, PhpNamespace } from "./config.js";
 export { runConfigureComposerCli } from "./cli.js";
 export {
   resolveValidationRules,
